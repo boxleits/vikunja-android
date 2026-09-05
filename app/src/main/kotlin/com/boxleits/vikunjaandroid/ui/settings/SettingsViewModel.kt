@@ -1,0 +1,62 @@
+package com.boxleits.vikunjaandroid.ui.settings
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
+import com.boxleits.vikunjaandroid.data.settings.VikunjaSettings
+import com.boxleits.vikunjaandroid.data.sync.SyncRepository
+import com.boxleits.vikunjaandroid.data.sync.SyncResult
+import com.boxleits.vikunjaandroid.data.sync.SyncScheduler
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.datetime.Instant
+import javax.inject.Inject
+
+@HiltViewModel
+class SettingsViewModel @Inject constructor(
+    settingsRepository: SettingsRepository,
+    private val syncRepository: SyncRepository,
+    private val syncScheduler: SyncScheduler,
+) : ViewModel() {
+
+    val settings: StateFlow<VikunjaSettings?> = settingsRepository.settingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val lastSyncedAt: StateFlow<Instant?> = settingsRepository.lastSyncedAtFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+
+    fun syncNow() {
+        if (_isSyncing.value) return
+        viewModelScope.launch {
+            _isSyncing.value = true
+            when (val result = syncRepository.sync()) {
+                is SyncResult.Error -> _errorMessage.value = result.exception.message
+                else -> _errorMessage.value = null
+            }
+            _isSyncing.value = false
+        }
+    }
+
+    fun dismissError() {
+        _errorMessage.value = null
+    }
+
+    fun logOut(onDone: () -> Unit) {
+        viewModelScope.launch {
+            syncScheduler.cancelPeriodicSync()
+            syncRepository.logOut()
+            onDone()
+        }
+    }
+}
