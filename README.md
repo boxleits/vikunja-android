@@ -88,6 +88,12 @@ Run just the pure-Kotlin module (no Android SDK required):
 > Gradle at a 17 (or 21) JDK via `JAVA_HOME`, or `org.gradle.java.home` in
 > `gradle.properties`.
 
+### CI
+
+`.github/workflows/build.yml` runs on every push to `master` and on every PR:
+one job runs `:core:test`, another assembles the debug APK and uploads it as
+a build artifact. Both pin JDK 17.
+
 ### Dev container
 
 `.devcontainer/` provides a container with JDK 17 and the Android SDK
