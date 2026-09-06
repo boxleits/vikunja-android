@@ -10,6 +10,9 @@ plugins {
 android {
     namespace = "com.boxleits.vikunjaandroid"
     compileSdk = 35
+    // Pinned so the dev container image (.devcontainer/Dockerfile) can
+    // pre-install exactly this version instead of downloading at build time.
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.boxleits.vikunjaandroid"

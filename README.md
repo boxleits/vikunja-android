@@ -68,20 +68,34 @@ library's alpha releases.
 
 ## Building
 
-Requires the Android SDK (compileSdk 35, minSdk 26) and network access to
-Google's Maven repository (`dl.google.com`) for the Android Gradle Plugin
-and androidx artifacts — see [note below](#a-note-on-how-this-was-built)
-for why that matters here.
+Requires **JDK 17** and the Android SDK (compileSdk 35, minSdk 26), plus
+network access to Google's Maven repository (`dl.google.com`) for the
+Android Gradle Plugin and androidx artifacts — see
+[note below](#a-note-on-how-this-was-built) for why that matters here.
 
 ```
 ./gradlew :app:assembleDebug
 ```
 
-Run just the pure-Kotlin module (no SDK required):
+Run just the pure-Kotlin module (no Android SDK required):
 
 ```
 ./gradlew :core:test
 ```
+
+> **JDK version matters.** Gradle 8.14 / AGP 8.6 / Kotlin 2.0 don't support
+> the newest JDKs — building with a JDK 25 or 27-ea toolchain fails. Point
+> Gradle at a 17 (or 21) JDK via `JAVA_HOME`, or `org.gradle.java.home` in
+> `gradle.properties`.
+
+### Dev container
+
+`.devcontainer/` provides a container with JDK 17 and the Android SDK
+preinstalled, which sidesteps both the JDK-version issue and having to
+layer an SDK onto an immutable host. It's set up for **Fedora Atomic +
+Podman + natively-installed VS Code**; see
+[`.devcontainer/README.md`](.devcontainer/README.md) for host setup and
+for the one-line change needed if you use Docker instead of Podman.
 
 ## A note on how this was built
 
@@ -102,6 +116,10 @@ Practical effect:
   :app:assembleDebug` you run as the real first build, and expect to fix
   a handful of small issues (an import, a nullability mismatch) that only
   a real compiler pass against the actual libraries would catch.
+- **`.devcontainer/`** has its JSON and shell validated, but the image was
+  never built there either (no container runtime, and the SDK download it
+  performs targets the blocked host). The first `Reopen in Container` is
+  its first real run.
 
 ## Roadmap
 

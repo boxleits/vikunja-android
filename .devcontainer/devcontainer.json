@@ -1,0 +1,43 @@
+{
+  "name": "Vikunja Outline (Android)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+
+  // Podman on Fedora Atomic. See .devcontainer/README.md.
+  //   --userns=keep-id:...  maps your host UID onto the container's `vscode`
+  //                         user, so files you create aren't root-owned.
+  //   --security-opt=label=disable  avoids SELinux denials on the bind-mounted
+  //                         workspace (the alternative is :Z-labelled mounts).
+  // Using Docker instead of Podman? Delete both of these runArgs.
+  "runArgs": [
+    "--userns=keep-id:uid=1000,gid=1000",
+    "--security-opt=label=disable"
+  ],
+
+  "containerUser": "vscode",
+  "remoteUser": "vscode",
+
+  // Keeps the ~500 MB of Gradle/AGP/androidx downloads across rebuilds.
+  "mounts": [
+    "source=vikunja-gradle-cache,target=/home/vscode/.gradle,type=volume"
+  ],
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "fwcd.kotlin",
+        "vscjava.vscode-gradle"
+      ],
+      "settings": {
+        "java.import.gradle.java.home": "/usr/local/sdkman/candidates/java/current",
+        "files.watcherExclude": {
+          "**/build/**": true,
+          "**/.gradle/**": true
+        }
+      }
+    }
+  }
+}
