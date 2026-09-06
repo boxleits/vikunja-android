@@ -86,6 +86,9 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    // Used directly here (entity mapping, agenda formatting), so declared
+    // explicitly rather than leaned on transitively via :core.
+    implementation(libs.kotlinx.datetime)
 
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.hilt.work)

@@ -1,10 +1,12 @@
 package com.boxleits.vikunjaandroid.widget
 
 import android.content.Context
+import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.GlanceTheme
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.actionStartActivity
@@ -15,7 +17,6 @@ import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
-import androidx.glance.material3.GlanceTheme
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
@@ -33,9 +34,11 @@ class AgendaWidget : GlanceAppWidget() {
         val repository = entryPoint(context).taskQueryRepository()
         val agenda = repository.observeAgenda().first()
 
+        val openApp = Intent(context, MainActivity::class.java)
+
         provideContent {
             GlanceTheme {
-                AgendaWidgetContent(agenda)
+                AgendaWidgetContent(agenda, openApp)
             }
         }
     }
@@ -45,7 +48,7 @@ class AgendaWidget : GlanceAppWidget() {
 }
 
 @Composable
-private fun AgendaWidgetContent(agenda: AgendaSections) {
+private fun AgendaWidgetContent(agenda: AgendaSections, openAppIntent: Intent) {
     val items = (agenda.overdue + agenda.today + agenda.tomorrow).take(MAX_WIDGET_ITEMS)
 
     Column(
@@ -53,7 +56,7 @@ private fun AgendaWidgetContent(agenda: AgendaSections) {
             .fillMaxSize()
             .background(GlanceTheme.colors.background)
             .padding(12.dp)
-            .clickable(actionStartActivity<MainActivity>()),
+            .clickable(actionStartActivity(openAppIntent)),
     ) {
         Text(
             text = "Agenda",
