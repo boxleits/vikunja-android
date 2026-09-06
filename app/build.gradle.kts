@@ -24,6 +24,20 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // A checked-in debug key, so every build — local or CI — signs debug
+        // APKs identically and they install over each other instead of
+        // failing with INSTALL_FAILED_UPDATE_INCOMPATIBLE. Debug keystores
+        // are not secrets (these are the stock Android debug credentials);
+        // this must never be used to sign a release build.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

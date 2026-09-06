@@ -68,7 +68,7 @@ class RemoteVikunjaRepositoryTest {
     }
 
     @Test
-    fun `the tasks request sends only pagination parameters`() = runTest {
+    fun `the tasks request uses the collection route with only pagination parameters`() = runTest {
         server.enqueue(MockResponse().setBody("[]"))
         server.enqueue(MockResponse().setBody("[]"))
         server.enqueue(MockResponse().setBody("[]"))
@@ -79,10 +79,11 @@ class RemoteVikunjaRepositoryTest {
         server.takeRequest() // labels
         val tasksRequest = server.takeRequest()
 
-        // filter_include_nulls only has meaning alongside a `filter`
-        // expression; on its own a real Vikunja server answers 400
-        // "Invalid model provided".
-        assertThat(tasksRequest.path).isEqualTo("/api/v1/tasks/all?page=1&per_page=50")
+        // Both halves of this matter against a real server: Vikunja has no
+        // /tasks/all route (that path answers 400 "Invalid model provided"),
+        // and filter_include_nulls is only valid alongside a `filter`
+        // expression.
+        assertThat(tasksRequest.path).isEqualTo("/api/v1/tasks?page=1&per_page=50")
     }
 
     @Test
