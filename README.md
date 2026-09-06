@@ -123,12 +123,17 @@ Practical effect:
   project properly, so configuring *any* module needs Google's Maven
   reachable — the Android SDK itself is still only needed for `:app`.
 - **`:app`** needs AGP and androidx (Compose, Room, Hilt, WorkManager,
-  Glance), which could not be resolved or compiled there. Its code was
-  written carefully against known-stable APIs and reviewed by hand, but it
-  has **not been compiled or run** anywhere. Treat the first `./gradlew
-  :app:assembleDebug` you run as the real first build, and expect to fix
-  a handful of small issues (an import, a nullability mismatch) that only
-  a real compiler pass against the actual libraries would catch.
+  Glance), which could not be resolved or compiled there, so it was
+  written against known-stable APIs and reviewed by hand rather than
+  compiled. CI has since given it a real compiler pass: **it now builds a
+  debug APK**, so Kotlin compilation, KSP codegen (Room, Hilt), resource
+  processing and packaging all pass. That first pass found 49 errors in
+  three groups — a missing `api` dependency, one wrong Glance package, and
+  one overload mismatch — all fixed.
+
+  Still untested: the app has **never been run**. Nothing below the
+  compiler has been exercised — no screen has rendered, no sync has hit a
+  real Vikunja instance, no widget has been placed. Expect runtime issues.
 - **`.devcontainer/`** has its JSON and shell validated, but the image was
   never built there either (no container runtime, and the SDK download it
   performs targets the blocked host). The first `Reopen in Container` is
@@ -138,7 +143,8 @@ Practical effect:
 
 Roughly in order:
 
-1. Fix up whatever the first real `:app` build surfaces.
+1. Run it: install the debug APK, point it at a real Vikunja instance, and
+   fix what breaks. Nothing below the compiler has been exercised yet.
 2. Editing: toggle done, change priority/labels/dates from the outline.
 3. Two-way sync with an offline edit queue and conflict handling.
 4. Quick-capture (an "Inbox" project, fast add from outside the app).
