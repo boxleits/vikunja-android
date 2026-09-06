@@ -91,8 +91,20 @@ Run just the pure-Kotlin module (no Android SDK required):
 ### CI
 
 `.github/workflows/build.yml` runs on every push to `master` and on every PR:
-one job runs `:core:test`, another assembles the debug APK and uploads it as
-a build artifact. Both pin JDK 17.
+one job runs `:core:test`, another assembles the debug APK. Both pin JDK 17.
+
+The APK is published two ways. The **`debug-latest` pre-release** always
+carries the newest build, at a stable direct-download URL:
+
+<https://github.com/boxleits/vikunja-android/releases/download/debug-latest/app-debug.apk>
+
+It's also attached to each run as a build artifact, which keeps per-run
+history but downloads as a zip — the release asset is the one to grab by
+hand.
+
+Debug builds are signed with the checked-in `app/debug.keystore`, so
+successive builds install over one another instead of forcing an
+uninstall. That key is not a secret and must never sign a release build.
 
 ### Dev container
 

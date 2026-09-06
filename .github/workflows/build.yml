@@ -40,6 +40,9 @@ jobs:
   app:
     name: assemble debug APK
     runs-on: ubuntu-latest
+    # Needed to publish the rolling debug release below.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -57,10 +60,37 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Upload APK
+      # Kept for per-run traceability. Artifacts are always served as a zip,
+      # so the rolling release below is the one to download by hand.
+      - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # Release assets download as the raw file, unlike artifacts. The tag is
+      # rolling, so this URL always serves the newest debug build:
+      #   https://github.com/${{ github.repository }}/releases/download/debug-latest/app-debug.apk
+      # Skipped for pull requests from forks, whose token can't write releases.
+      - name: Publish rolling debug release
+        if: success() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # On pull_request, github.sha is the ephemeral merge commit; tag the
+          # real branch head instead.
+          RELEASE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RELEASE_REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Recreate rather than clobber, so the tag follows the built commit.
+          gh release delete debug-latest --yes --cleanup-tag || true
+          gh release create debug-latest \
+            app/build/outputs/apk/debug/app-debug.apk \
+            --target "$RELEASE_SHA" \
+            --prerelease \
+            --title "Debug build (latest)" \
+            --notes "Automatic debug build of \`$RELEASE_SHA\` from \`$RELEASE_REF\`.
+
+          Debug-signed with the repo's checked-in key, so builds install over each other."
