@@ -75,6 +75,48 @@ class AgendaSectionsTest {
     }
 
     @Test
+    fun `widget prefers imminent tasks`() {
+        val tasks = listOf(
+            sampleTask(id = 1, title = "Today", dueDate = instantFor(today)),
+            sampleTask(id = 2, title = "Later", dueDate = instantFor(LocalDate(2024, 3, 1))),
+        )
+
+        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), limit = 8)
+
+        assertThat(widget.items.map { it.task.id }).containsExactly(1L)
+        assertThat(widget.showingUpcoming).isFalse()
+    }
+
+    @Test
+    fun `widget falls back to upcoming tasks when nothing is imminent`() {
+        val tasks = listOf(
+            sampleTask(id = 1, title = "This week", dueDate = instantFor(LocalDate(2024, 1, 14))),
+            sampleTask(id = 2, title = "Later", dueDate = instantFor(LocalDate(2024, 3, 1))),
+        )
+
+        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), limit = 8)
+
+        assertThat(widget.items.map { it.task.id }).containsExactly(1L, 2L).inOrder()
+        assertThat(widget.showingUpcoming).isTrue()
+    }
+
+    @Test
+    fun `widget respects the item limit`() {
+        val tasks = (1L..10L).map { sampleTask(id = it, dueDate = instantFor(today)) }
+
+        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), limit = 3)
+
+        assertThat(widget.items).hasSize(3)
+    }
+
+    @Test
+    fun `widget is empty when there is nothing dated at all`() {
+        val widget = widgetAgenda(buildAgenda(listOf(sampleTask(id = 1)), today, timeZone), limit = 8)
+
+        assertThat(widget.items).isEmpty()
+    }
+
+    @Test
     fun `same-day tasks sort by priority then title`() {
         val tasks = listOf(
             sampleTask(id = 1, title = "B low", dueDate = instantFor(today), priority = Priority.LOW),

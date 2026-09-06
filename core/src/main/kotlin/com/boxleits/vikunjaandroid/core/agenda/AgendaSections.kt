@@ -68,6 +68,26 @@ fun buildAgenda(
     )
 }
 
+/**
+ * What the home screen widget shows. Prefers what's imminent
+ * (overdue/today/tomorrow), but rather than sitting empty when nothing is
+ * pressing it falls back to the next upcoming items — [showingUpcoming]
+ * lets the widget say which it is.
+ */
+data class WidgetAgenda(
+    val items: List<AgendaItem>,
+    val showingUpcoming: Boolean,
+)
+
+fun widgetAgenda(sections: AgendaSections, limit: Int): WidgetAgenda {
+    val imminent = sections.overdue + sections.today + sections.tomorrow
+    if (imminent.isNotEmpty()) {
+        return WidgetAgenda(imminent.take(limit), showingUpcoming = false)
+    }
+    val upcoming = sections.thisWeek + sections.later
+    return WidgetAgenda(upcoming.take(limit), showingUpcoming = true)
+}
+
 private fun bucketFor(date: LocalDate, today: LocalDate): AgendaBucket {
     val daysBetween = today.daysUntil(date)
     return when {
