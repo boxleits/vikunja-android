@@ -23,6 +23,7 @@ import androidx.glance.text.TextStyle
 import com.boxleits.vikunjaandroid.MainActivity
 import com.boxleits.vikunjaandroid.core.agenda.AgendaItem
 import com.boxleits.vikunjaandroid.core.agenda.AgendaSections
+import com.boxleits.vikunjaandroid.core.agenda.widgetAgenda
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.first
 
@@ -49,7 +50,7 @@ class AgendaWidget : GlanceAppWidget() {
 
 @Composable
 private fun AgendaWidgetContent(agenda: AgendaSections, openAppIntent: Intent) {
-    val items = (agenda.overdue + agenda.today + agenda.tomorrow).take(MAX_WIDGET_ITEMS)
+    val widget = widgetAgenda(agenda, MAX_WIDGET_ITEMS)
 
     Column(
         modifier = GlanceModifier
@@ -59,25 +60,36 @@ private fun AgendaWidgetContent(agenda: AgendaSections, openAppIntent: Intent) {
             .clickable(actionStartActivity(openAppIntent)),
     ) {
         Text(
-            text = "Agenda",
+            text = if (widget.showingUpcoming) "Upcoming" else "Agenda",
             style = TextStyle(fontWeight = FontWeight.Bold, color = GlanceTheme.colors.onBackground),
         )
         Spacer(modifier = GlanceModifier.height(8.dp))
-        if (items.isEmpty()) {
+        if (widget.items.isEmpty()) {
             Text(
-                text = "Nothing due",
+                text = "Nothing scheduled",
                 style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant),
             )
         } else {
-            items.forEach { item -> AgendaWidgetRow(item) }
+            // Dates only earn their space once the items aren't all imminent.
+            widget.items.forEach { item -> AgendaWidgetRow(item, showDate = widget.showingUpcoming) }
         }
     }
 }
 
 @Composable
-private fun AgendaWidgetRow(item: AgendaItem) {
-    val marker = item.task.priority.orgMarker
-    val label = if (marker.isEmpty()) item.task.title else "$marker ${item.task.title}"
+private fun AgendaWidgetRow(item: AgendaItem, showDate: Boolean) {
+    val label = buildString {
+        val marker = item.task.priority.orgMarker
+        if (marker.isNotEmpty()) {
+            append(marker)
+            append(' ')
+        }
+        append(item.task.title)
+        if (showDate) {
+            append("  ")
+            append(item.date.toString())
+        }
+    }
     Text(
         text = label,
         style = TextStyle(color = GlanceTheme.colors.onBackground),
