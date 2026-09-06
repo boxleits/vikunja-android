@@ -39,7 +39,7 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
             val response = api.getAllTasks(page = page)
             if (!response.isSuccessful) {
                 if (response.code() == 401) throw VikunjaSyncException.Unauthorized()
-                throw VikunjaSyncException.Unexpected(HttpException(response))
+                throw VikunjaSyncException.Server(response.code(), response.errorBody()?.string())
             }
             val pageBody = response.body().orEmpty()
             dtos += pageBody
@@ -55,7 +55,10 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
     } catch (e: VikunjaSyncException) {
         throw e
     } catch (e: HttpException) {
-        if (e.code() == 401) throw VikunjaSyncException.Unauthorized(e) else throw VikunjaSyncException.Unexpected(e)
+        when (e.code()) {
+            401 -> throw VikunjaSyncException.Unauthorized(e)
+            else -> throw VikunjaSyncException.Server(e.code(), e.response()?.errorBody()?.string())
+        }
     } catch (e: IOException) {
         throw VikunjaSyncException.Network(e)
     } catch (e: Exception) {

@@ -1,9 +1,12 @@
+// Every plugin is declared here with `apply false` so that AGP and the
+// Kotlin Gradle plugin resolve into the *same* buildscript classloader.
+// Declaring AGP only in :app while KGP sits here splits them across parent
+// and child scopes, and KGP then fails to load AGP's BaseVariant class:
+//   Could not create an instance of type ...KotlinAndroidTarget
+//   > NoClassDefFoundError: com/android/build/gradle/api/BaseVariant
 plugins {
-    // NOTE: com.android.application / com.android.library are intentionally
-    // declared only in :app's own build script (not here with apply false).
-    // They are published exclusively to Google's Maven repo, and pinning
-    // them here would force Gradle to resolve that repo while configuring
-    // *every* module, even a `:core:test`-only invocation.
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.library) apply false
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.jvm) apply false
     alias(libs.plugins.kotlin.compose) apply false

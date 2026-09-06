@@ -20,12 +20,20 @@ interface VikunjaApi {
      * Returns one page of every task across all projects. Callers should
      * keep requesting increasing [page] values until the response's
      * `x-pagination-total-pages` header is reached (see [PAGINATION_TOTAL_PAGES_HEADER]).
+     *
+     * The path is `tasks`, not `tasks/all`: Vikunja registers
+     * `GET /tasks` for the collection (pkg/routes/routes.go), and there is
+     * no `/tasks/all` route — that path falls through to a parameterised
+     * route which fails to bind "all" and answers
+     * `400 Invalid model provided`.
+     *
+     * Sends no filter parameters either: `filter_include_nulls` only has
+     * meaning alongside a `filter` expression.
      */
-    @GET("api/v1/tasks/all")
+    @GET("api/v1/tasks")
     suspend fun getAllTasks(
         @Query("page") page: Int,
         @Query("per_page") perPage: Int = DEFAULT_PAGE_SIZE,
-        @Query("filter_include_nulls") filterIncludeNulls: Boolean = true,
     ): Response<List<TaskDto>>
 
     companion object {

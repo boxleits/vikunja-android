@@ -10,6 +10,9 @@ plugins {
 android {
     namespace = "com.boxleits.vikunjaandroid"
     compileSdk = 35
+    // Pinned so the dev container image (.devcontainer/Dockerfile) can
+    // pre-install exactly this version instead of downloading at build time.
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.boxleits.vikunjaandroid"
@@ -19,6 +22,20 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        // A checked-in debug key, so every build — local or CI — signs debug
+        // APKs identically and they install over each other instead of
+        // failing with INSTALL_FAILED_UPDATE_INCOMPATIBLE. Debug keystores
+        // are not secrets (these are the stock Android debug credentials);
+        // this must never be used to sign a release build.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -83,6 +100,9 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+    // Used directly here (entity mapping, agenda formatting), so declared
+    // explicitly rather than leaned on transitively via :core.
+    implementation(libs.kotlinx.datetime)
 
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.hilt.work)

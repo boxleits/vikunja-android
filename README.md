@@ -68,20 +68,52 @@ library's alpha releases.
 
 ## Building
 
-Requires the Android SDK (compileSdk 35, minSdk 26) and network access to
-Google's Maven repository (`dl.google.com`) for the Android Gradle Plugin
-and androidx artifacts — see [note below](#a-note-on-how-this-was-built)
-for why that matters here.
+Requires **JDK 17** and the Android SDK (compileSdk 35, minSdk 26), plus
+network access to Google's Maven repository (`dl.google.com`) for the
+Android Gradle Plugin and androidx artifacts — see
+[note below](#a-note-on-how-this-was-built) for why that matters here.
 
 ```
 ./gradlew :app:assembleDebug
 ```
 
-Run just the pure-Kotlin module (no SDK required):
+Run just the pure-Kotlin module (no Android SDK required):
 
 ```
 ./gradlew :core:test
 ```
+
+> **JDK version matters.** Gradle 8.14 / AGP 8.6 / Kotlin 2.0 don't support
+> the newest JDKs — building with a JDK 25 or 27-ea toolchain fails. Point
+> Gradle at a 17 (or 21) JDK via `JAVA_HOME`, or `org.gradle.java.home` in
+> `gradle.properties`.
+
+### CI
+
+`.github/workflows/build.yml` runs on every push to `master` and on every PR:
+one job runs `:core:test`, another assembles the debug APK. Both pin JDK 17.
+
+The APK is published two ways. The **`debug-latest` pre-release** always
+carries the newest build, at a stable direct-download URL:
+
+<https://github.com/boxleits/vikunja-android/releases/download/debug-latest/app-debug.apk>
+
+It's also attached to each run as a build artifact, which keeps per-run
+history but downloads as a zip — the release asset is the one to grab by
+hand.
+
+Debug builds are signed with the checked-in `app/debug.keystore`, so
+successive builds install over one another instead of forcing an
+uninstall. That key is not a secret and must never sign a release build.
+
+### Dev container
+
+`.devcontainer/` provides a container with JDK 17 and the Android SDK
+preinstalled, which sidesteps both the JDK-version issue and having to
+layer an SDK onto an immutable host. It's set up for **Fedora Atomic +
+Podman + natively-installed VS Code**; see
+[`.devcontainer/README.md`](.devcontainer/README.md) for host setup and
+for the one-line change needed if you use Docker instead of Podman.
 
 ## A note on how this was built
 
@@ -95,19 +127,36 @@ Practical effect:
   coroutines/datetime — all Maven Central). It was fully compiled and its
   **20 unit tests were run and pass** in that environment
   (`./gradlew :core:test`).
+
+  Reaching that point needed AGP kept out of the root `plugins {}` block,
+  which turned out to break the real build: it splits AGP and the Kotlin
+  plugin across two buildscript classloaders, and KGP then can't load
+  AGP's `BaseVariant`. The workaround is gone now that CI builds the
+  project properly, so configuring *any* module needs Google's Maven
+  reachable — the Android SDK itself is still only needed for `:app`.
 - **`:app`** needs AGP and androidx (Compose, Room, Hilt, WorkManager,
-  Glance), which could not be resolved or compiled there. Its code was
-  written carefully against known-stable APIs and reviewed by hand, but it
-  has **not been compiled or run** anywhere. Treat the first `./gradlew
-  :app:assembleDebug` you run as the real first build, and expect to fix
-  a handful of small issues (an import, a nullability mismatch) that only
-  a real compiler pass against the actual libraries would catch.
+  Glance), which could not be resolved or compiled there, so it was
+  written against known-stable APIs and reviewed by hand rather than
+  compiled. CI has since given it a real compiler pass: **it now builds a
+  debug APK**, so Kotlin compilation, KSP codegen (Room, Hilt), resource
+  processing and packaging all pass. That first pass found 49 errors in
+  three groups — a missing `api` dependency, one wrong Glance package, and
+  one overload mismatch — all fixed.
+
+  Still untested: the app has **never been run**. Nothing below the
+  compiler has been exercised — no screen has rendered, no sync has hit a
+  real Vikunja instance, no widget has been placed. Expect runtime issues.
+- **`.devcontainer/`** has its JSON and shell validated, but the image was
+  never built there either (no container runtime, and the SDK download it
+  performs targets the blocked host). The first `Reopen in Container` is
+  its first real run.
 
 ## Roadmap
 
 Roughly in order:
 
-1. Fix up whatever the first real `:app` build surfaces.
+1. Run it: install the debug APK, point it at a real Vikunja instance, and
+   fix what breaks. Nothing below the compiler has been exercised yet.
 2. Editing: toggle done, change priority/labels/dates from the outline.
 3. Two-way sync with an offline edit queue and conflict handling.
 4. Quick-capture (an "Inbox" project, fast add from outside the app).

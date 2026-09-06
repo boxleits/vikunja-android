@@ -68,6 +68,49 @@ class RemoteVikunjaRepositoryTest {
     }
 
     @Test
+    fun `the tasks request uses the collection route with only pagination parameters`() = runTest {
+        server.enqueue(MockResponse().setBody("[]"))
+        server.enqueue(MockResponse().setBody("[]"))
+        server.enqueue(MockResponse().setBody("[]"))
+
+        repository.fetchSnapshot()
+
+        server.takeRequest() // projects
+        server.takeRequest() // labels
+        val tasksRequest = server.takeRequest()
+
+        // Both halves of this matter against a real server: Vikunja has no
+        // /tasks/all route (that path answers 400 "Invalid model provided"),
+        // and filter_include_nulls is only valid alongside a `filter`
+        // expression.
+        assertThat(tasksRequest.path).isEqualTo("/api/v1/tasks?page=1&per_page=50")
+    }
+
+    @Test
+    fun `a non-401 error surfaces the status and the server's message`() = runTest {
+        server.enqueue(MockResponse().setBody("[]"))
+        server.enqueue(MockResponse().setBody("[]"))
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(400)
+                .setBody("""{"message":"Invalid model provided: Bad Request"}"""),
+        )
+
+        val exception = try {
+            repository.fetchSnapshot()
+            null
+        } catch (e: VikunjaSyncException) {
+            e
+        }
+
+        assertThat(exception).isInstanceOf(VikunjaSyncException.Server::class.java)
+        val serverError = exception as VikunjaSyncException.Server
+        assertThat(serverError.statusCode).isEqualTo(400)
+        assertThat(serverError.message).contains("400")
+        assertThat(serverError.message).contains("Invalid model provided")
+    }
+
+    @Test
     fun `a 401 response is surfaced as Unauthorized`() = runTest {
         server.enqueue(MockResponse().setResponseCode(401))
 
