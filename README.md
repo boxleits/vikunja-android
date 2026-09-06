@@ -115,6 +115,13 @@ Practical effect:
   coroutines/datetime — all Maven Central). It was fully compiled and its
   **20 unit tests were run and pass** in that environment
   (`./gradlew :core:test`).
+
+  Reaching that point needed AGP kept out of the root `plugins {}` block,
+  which turned out to break the real build: it splits AGP and the Kotlin
+  plugin across two buildscript classloaders, and KGP then can't load
+  AGP's `BaseVariant`. The workaround is gone now that CI builds the
+  project properly, so configuring *any* module needs Google's Maven
+  reachable — the Android SDK itself is still only needed for `:app`.
 - **`:app`** needs AGP and androidx (Compose, Room, Hilt, WorkManager,
   Glance), which could not be resolved or compiled there. Its code was
   written carefully against known-stable APIs and reviewed by hand, but it
