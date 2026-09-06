@@ -2,9 +2,11 @@ package com.boxleits.vikunjaandroid.ui.outline
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.boxleits.vikunjaandroid.data.sync.EditResult
 import com.boxleits.vikunjaandroid.data.sync.ProjectOutline
 import com.boxleits.vikunjaandroid.data.sync.SyncRepository
 import com.boxleits.vikunjaandroid.data.sync.SyncResult
+import com.boxleits.vikunjaandroid.data.sync.TaskEditRepository
 import com.boxleits.vikunjaandroid.data.sync.TaskQueryRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +21,7 @@ import javax.inject.Inject
 class OutlineViewModel @Inject constructor(
     taskQueryRepository: TaskQueryRepository,
     private val syncRepository: SyncRepository,
+    private val taskEditRepository: TaskEditRepository,
 ) : ViewModel() {
 
     val outline: StateFlow<List<ProjectOutline>> = taskQueryRepository.observeOutline()
@@ -39,6 +42,19 @@ class OutlineViewModel @Inject constructor(
                 else -> _errorMessage.value = null
             }
             _isRefreshing.value = false
+        }
+    }
+
+    /**
+     * The repository flips the row locally first, so the checkbox reacts
+     * immediately and reverts by itself if the server rejects the change.
+     */
+    fun setDone(taskId: Long, done: Boolean) {
+        viewModelScope.launch {
+            when (val result = taskEditRepository.setDone(taskId, done)) {
+                is EditResult.Error -> _errorMessage.value = result.message
+                EditResult.Success -> Unit
+            }
         }
     }
 

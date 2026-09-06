@@ -31,6 +31,7 @@ fun OutlineTaskRow(
     depth: Int,
     isCollapsed: Boolean,
     onToggleCollapse: () -> Unit,
+    onSetDone: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val task = node.task
@@ -52,7 +53,7 @@ fun OutlineTaskRow(
             Spacer(modifier = Modifier.size(28.dp))
         }
 
-        Checkbox(checked = task.done, onCheckedChange = null)
+        Checkbox(checked = task.done, onCheckedChange = onSetDone)
         Spacer(modifier = Modifier.width(4.dp))
 
         Column(modifier = Modifier.weight(1f)) {

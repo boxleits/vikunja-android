@@ -21,6 +21,12 @@ interface TaskDao {
     @Query("SELECT * FROM tasks")
     suspend fun getAllWithLabels(): List<TaskWithLabels>
 
+    @Query("SELECT * FROM tasks WHERE id = :id")
+    suspend fun findById(id: Long): TaskEntity?
+
+    @Query("UPDATE tasks SET done = :done, doneAtEpochMs = :doneAtEpochMs WHERE id = :id")
+    suspend fun updateDone(id: Long, done: Boolean, doneAtEpochMs: Long?)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTasks(tasks: List<TaskEntity>)
 

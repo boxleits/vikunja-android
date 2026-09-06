@@ -84,14 +84,17 @@ fun OutlineScreen(
                     )
                 }
             } else {
-                OutlineList(projectOutlines)
+                OutlineList(projectOutlines, onSetDone = viewModel::setDone)
             }
         }
     }
 }
 
 @Composable
-private fun OutlineList(projectOutlines: List<ProjectOutline>) {
+private fun OutlineList(
+    projectOutlines: List<ProjectOutline>,
+    onSetDone: (taskId: Long, done: Boolean) -> Unit,
+) {
     val collapsedIds = rememberSaveable(saver = LongSetSaver) { mutableStateOf<Set<Long>>(emptySet()) }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -112,6 +115,7 @@ private fun OutlineList(projectOutlines: List<ProjectOutline>) {
                     onToggleCollapse = {
                         collapsedIds.value = collapsedIds.value.toggle(node.task.id)
                     },
+                    onSetDone = { done -> onSetDone(node.task.id, done) },
                 )
             }
         }
