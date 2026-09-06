@@ -1,5 +1,6 @@
 package com.boxleits.vikunjaandroid.ui.components
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -24,6 +25,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.boxleits.vikunjaandroid.core.outline.OutlineNode
 
+/** Fixed width for the expand/collapse column, so every checkbox in a level lines up. */
+private val CHEVRON_SLOT = 40.dp
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun OutlineTaskRow(
@@ -39,22 +43,33 @@ fun OutlineTaskRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = (depth * 20).dp, top = 6.dp, bottom = 6.dp, end = 12.dp),
-        verticalAlignment = Alignment.Top,
+            .padding(start = (depth * 20).dp, top = 2.dp, bottom = 2.dp, end = 12.dp),
+        // Centred, not Top: a Checkbox draws its box in the middle of a 48dp
+        // touch target, so aligning to the top leaves the box sitting well
+        // below its own title — close enough to the next row to look like it
+        // belongs to it.
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (node.children.isNotEmpty()) {
-            IconButton(onClick = onToggleCollapse, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    imageVector = if (isCollapsed) Icons.Filled.KeyboardArrowRight else Icons.Filled.KeyboardArrowDown,
-                    contentDescription = if (isCollapsed) "Expand" else "Collapse",
-                )
+        // Both branches occupy this same fixed slot. Sizing the IconButton
+        // directly doesn't work: it applies its own minimum touch target, so
+        // the chevron and the empty spacer could end up different widths and
+        // shift the checkbox depending on whether a task has children.
+        Box(modifier = Modifier.size(CHEVRON_SLOT), contentAlignment = Alignment.Center) {
+            if (node.children.isNotEmpty()) {
+                IconButton(onClick = onToggleCollapse) {
+                    Icon(
+                        imageVector = if (isCollapsed) {
+                            Icons.Filled.KeyboardArrowRight
+                        } else {
+                            Icons.Filled.KeyboardArrowDown
+                        },
+                        contentDescription = if (isCollapsed) "Expand" else "Collapse",
+                    )
+                }
             }
-        } else {
-            Spacer(modifier = Modifier.size(28.dp))
         }
 
         Checkbox(checked = task.done, onCheckedChange = onSetDone)
-        Spacer(modifier = Modifier.width(4.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
