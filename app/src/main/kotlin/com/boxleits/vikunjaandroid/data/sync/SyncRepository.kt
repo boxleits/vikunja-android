@@ -1,7 +1,5 @@
 package com.boxleits.vikunjaandroid.data.sync
 
-import android.content.Context
-import androidx.glance.appwidget.updateAll
 import androidx.room.withTransaction
 import com.boxleits.vikunjaandroid.core.repository.RemoteVikunjaRepository
 import com.boxleits.vikunjaandroid.core.repository.VikunjaSyncException
@@ -9,8 +7,6 @@ import com.boxleits.vikunjaandroid.data.local.AppDatabase
 import com.boxleits.vikunjaandroid.data.local.entity.TaskLabelCrossRef
 import com.boxleits.vikunjaandroid.data.local.entity.toEntity
 import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
-import com.boxleits.vikunjaandroid.widget.AgendaWidget
-import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,7 +22,7 @@ class SyncRepository @Inject constructor(
     private val database: AppDatabase,
     private val settingsRepository: SettingsRepository,
     private val taskEditRepository: TaskEditRepository,
-    @ApplicationContext private val context: Context,
+    private val widgetRefresher: WidgetRefresher,
 ) {
     suspend fun sync(): SyncResult {
         val api = apiProvider.getApi() ?: return SyncResult.NotConfigured
@@ -66,7 +62,7 @@ class SyncRepository @Inject constructor(
             // through here — pull-to-refresh and onboarding call this directly
             // rather than going via SyncWorker — so this is the one place that
             // reliably keeps the widget from showing stale data.
-            AgendaWidget().updateAll(context)
+            widgetRefresher.refresh()
 
             SyncResult.Success
         } catch (e: VikunjaSyncException) {
@@ -85,6 +81,6 @@ class SyncRepository @Inject constructor(
         }
         settingsRepository.clear()
         // Otherwise the widget keeps displaying the logged-out user's tasks.
-        AgendaWidget().updateAll(context)
+        widgetRefresher.refresh()
     }
 }

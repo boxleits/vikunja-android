@@ -74,44 +74,78 @@ class AgendaSectionsTest {
         assertThat(agenda.later.single().isDueDate).isTrue()
     }
 
+    /** One task in each bucket, so a horizon's cut-off is visible. */
+    private fun spreadOfTasks() = listOf(
+        sampleTask(id = 1, title = "Overdue", dueDate = instantFor(LocalDate(2024, 1, 5))),
+        sampleTask(id = 2, title = "Today", dueDate = instantFor(today)),
+        sampleTask(id = 3, title = "Tomorrow", dueDate = instantFor(LocalDate(2024, 1, 11))),
+        sampleTask(id = 4, title = "This week", dueDate = instantFor(LocalDate(2024, 1, 14))),
+        sampleTask(id = 5, title = "Later", dueDate = instantFor(LocalDate(2024, 3, 1))),
+    )
+
     @Test
-    fun `widget prefers imminent tasks`() {
-        val tasks = listOf(
-            sampleTask(id = 1, title = "Today", dueDate = instantFor(today)),
-            sampleTask(id = 2, title = "Later", dueDate = instantFor(LocalDate(2024, 3, 1))),
-        )
+    fun `each horizon includes exactly its buckets`() {
+        val agenda = buildAgenda(spreadOfTasks(), today, timeZone)
 
-        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), limit = 8)
+        fun idsFor(horizon: WidgetHorizon) =
+            widgetAgenda(agenda, horizon, limit = 10).items.map { it.task.id }
 
-        assertThat(widget.items.map { it.task.id }).containsExactly(1L)
-        assertThat(widget.showingUpcoming).isFalse()
+        assertThat(idsFor(WidgetHorizon.TODAY)).containsExactly(1L, 2L)
+        assertThat(idsFor(WidgetHorizon.TOMORROW)).containsExactly(1L, 2L, 3L)
+        assertThat(idsFor(WidgetHorizon.THIS_WEEK)).containsExactly(1L, 2L, 3L, 4L)
+        assertThat(idsFor(WidgetHorizon.EVERYTHING)).containsExactly(1L, 2L, 3L, 4L, 5L)
     }
 
     @Test
-    fun `widget falls back to upcoming tasks when nothing is imminent`() {
+    fun `overdue tasks appear in every horizon`() {
+        val tasks = listOf(sampleTask(id = 1, dueDate = instantFor(LocalDate(2024, 1, 5))))
+        val agenda = buildAgenda(tasks, today, timeZone)
+
+        WidgetHorizon.entries.forEach { horizon ->
+            val widget = widgetAgenda(agenda, horizon, limit = 10)
+            assertThat(widget.items.map { it.task.id }).containsExactly(1L)
+            assertThat(widget.showingUpcoming).isFalse()
+        }
+    }
+
+    @Test
+    fun `falls back to what lies beyond the horizon rather than showing nothing`() {
         val tasks = listOf(
-            sampleTask(id = 1, title = "This week", dueDate = instantFor(LocalDate(2024, 1, 14))),
-            sampleTask(id = 2, title = "Later", dueDate = instantFor(LocalDate(2024, 3, 1))),
+            sampleTask(id = 4, title = "This week", dueDate = instantFor(LocalDate(2024, 1, 14))),
+            sampleTask(id = 5, title = "Later", dueDate = instantFor(LocalDate(2024, 3, 1))),
         )
 
-        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), limit = 8)
+        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), WidgetHorizon.TODAY, limit = 8)
 
-        assertThat(widget.items.map { it.task.id }).containsExactly(1L, 2L).inOrder()
+        assertThat(widget.items.map { it.task.id }).containsExactly(4L, 5L).inOrder()
         assertThat(widget.showingUpcoming).isTrue()
+    }
+
+    @Test
+    fun `the widest horizon has nothing to fall back to`() {
+        val widget = widgetAgenda(
+            buildAgenda(spreadOfTasks(), today, timeZone),
+            WidgetHorizon.EVERYTHING,
+            limit = 10,
+        )
+
+        assertThat(widget.showingUpcoming).isFalse()
     }
 
     @Test
     fun `widget respects the item limit`() {
         val tasks = (1L..10L).map { sampleTask(id = it, dueDate = instantFor(today)) }
 
-        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), limit = 3)
+        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), WidgetHorizon.TODAY, limit = 3)
 
         assertThat(widget.items).hasSize(3)
     }
 
     @Test
     fun `widget is empty when there is nothing dated at all`() {
-        val widget = widgetAgenda(buildAgenda(listOf(sampleTask(id = 1)), today, timeZone), limit = 8)
+        val agenda = buildAgenda(listOf(sampleTask(id = 1)), today, timeZone)
+
+        val widget = widgetAgenda(agenda, WidgetHorizon.TOMORROW, limit = 8)
 
         assertThat(widget.items).isEmpty()
     }

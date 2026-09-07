@@ -2,12 +2,15 @@ package com.boxleits.vikunjaandroid.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.boxleits.vikunjaandroid.core.agenda.WidgetHorizon
 import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
 import com.boxleits.vikunjaandroid.data.settings.VikunjaSettings
+import com.boxleits.vikunjaandroid.data.settings.WidgetSettings
 import com.boxleits.vikunjaandroid.data.sync.SyncRepository
 import com.boxleits.vikunjaandroid.data.sync.SyncResult
 import com.boxleits.vikunjaandroid.data.sync.SyncScheduler
 import com.boxleits.vikunjaandroid.data.sync.TaskEditRepository
+import com.boxleits.vikunjaandroid.data.sync.WidgetRefresher
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,9 +23,10 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    settingsRepository: SettingsRepository,
+    private val settingsRepository: SettingsRepository,
     private val syncRepository: SyncRepository,
     private val syncScheduler: SyncScheduler,
+    private val widgetRefresher: WidgetRefresher,
     taskEditRepository: TaskEditRepository,
 ) : ViewModel() {
 
@@ -35,6 +39,25 @@ class SettingsViewModel @Inject constructor(
     /** Edits applied on this device that the server hasn't accepted yet. */
     val pendingEditCount: StateFlow<Int> = taskEditRepository.observePendingCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    val widgetSettings: StateFlow<WidgetSettings> = settingsRepository.widgetSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), WidgetSettings.DEFAULT)
+
+    fun setWidgetHorizon(horizon: WidgetHorizon) {
+        viewModelScope.launch {
+            settingsRepository.setWidgetHorizon(horizon)
+            // The widget only redraws when asked, so a setting change has to
+            // push it rather than wait for the next sync.
+            widgetRefresher.refresh()
+        }
+    }
+
+    fun setWidgetMaxItems(maxItems: Int) {
+        viewModelScope.launch {
+            settingsRepository.setWidgetMaxItems(maxItems)
+            widgetRefresher.refresh()
+        }
+    }
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()

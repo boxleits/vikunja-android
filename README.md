@@ -32,6 +32,7 @@ heading hierarchy or multi-state workflow. The mapping this app uses:
 | `SCHEDULED`/`DEADLINE` | `start_date`/`due_date` | Agenda view, due date wins if both are set |
 | `:tag:` | Label | Label chip |
 | Agenda view | — | Computed client-side across all projects |
+| Agenda in the home screen widget | — | Same data, with a configurable horizon (Settings → Widget) |
 
 Since Vikunja has no subtask hierarchy of its own, the outline tree is
 reconstructed from task relations rather than stored that way on the

@@ -68,24 +68,48 @@ fun buildAgenda(
     )
 }
 
+/** How far ahead the home screen widget looks. Overdue is always included. */
+enum class WidgetHorizon {
+    TODAY,
+    TOMORROW,
+    THIS_WEEK,
+    EVERYTHING,
+}
+
 /**
- * What the home screen widget shows. Prefers what's imminent
- * (overdue/today/tomorrow), but rather than sitting empty when nothing is
- * pressing it falls back to the next upcoming items — [showingUpcoming]
- * lets the widget say which it is.
+ * What the home screen widget shows: whatever falls inside the chosen
+ * horizon, or — rather than sitting empty when nothing is due that soon —
+ * the next items beyond it. [showingUpcoming] lets the widget say which.
  */
 data class WidgetAgenda(
     val items: List<AgendaItem>,
     val showingUpcoming: Boolean,
 )
 
-fun widgetAgenda(sections: AgendaSections, limit: Int): WidgetAgenda {
-    val imminent = sections.overdue + sections.today + sections.tomorrow
-    if (imminent.isNotEmpty()) {
-        return WidgetAgenda(imminent.take(limit), showingUpcoming = false)
+fun widgetAgenda(
+    sections: AgendaSections,
+    horizon: WidgetHorizon,
+    limit: Int,
+): WidgetAgenda {
+    // Overdue is in every horizon: something already late is the last thing
+    // a widget should hide.
+    val within = buildList {
+        addAll(sections.overdue)
+        addAll(sections.today)
+        if (horizon >= WidgetHorizon.TOMORROW) addAll(sections.tomorrow)
+        if (horizon >= WidgetHorizon.THIS_WEEK) addAll(sections.thisWeek)
+        if (horizon >= WidgetHorizon.EVERYTHING) addAll(sections.later)
     }
-    val upcoming = sections.thisWeek + sections.later
-    return WidgetAgenda(upcoming.take(limit), showingUpcoming = true)
+    if (within.isNotEmpty()) {
+        return WidgetAgenda(within.take(limit), showingUpcoming = false)
+    }
+
+    val beyond = buildList {
+        if (horizon < WidgetHorizon.TOMORROW) addAll(sections.tomorrow)
+        if (horizon < WidgetHorizon.THIS_WEEK) addAll(sections.thisWeek)
+        if (horizon < WidgetHorizon.EVERYTHING) addAll(sections.later)
+    }
+    return WidgetAgenda(beyond.take(limit), showingUpcoming = true)
 }
 
 private fun bucketFor(date: LocalDate, today: LocalDate): AgendaBucket {

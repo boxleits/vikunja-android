@@ -1,15 +1,11 @@
 package com.boxleits.vikunjaandroid.data.sync
 
-import android.content.Context
-import androidx.glance.appwidget.updateAll
 import com.boxleits.vikunjaandroid.core.repository.RemoteVikunjaRepository
 import com.boxleits.vikunjaandroid.core.repository.VikunjaSyncException
 import com.boxleits.vikunjaandroid.core.repository.isRetryable
 import com.boxleits.vikunjaandroid.data.local.AppDatabase
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_SET_DONE
 import com.boxleits.vikunjaandroid.data.local.entity.PendingEditEntity
-import com.boxleits.vikunjaandroid.widget.AgendaWidget
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.datetime.Clock
 import javax.inject.Inject
@@ -39,7 +35,7 @@ class TaskEditRepository @Inject constructor(
     private val apiProvider: VikunjaApiProvider,
     private val database: AppDatabase,
     private val syncScheduler: SyncScheduler,
-    @ApplicationContext private val context: Context,
+    private val widgetRefresher: WidgetRefresher,
 ) {
     /** How many edits are waiting for the server. */
     fun observePendingCount(): Flow<Int> = database.pendingEditDao().observeCount()
@@ -74,7 +70,7 @@ class TaskEditRepository @Inject constructor(
                 createdAtEpochMs = now.toEpochMilliseconds(),
             ),
         )
-        AgendaWidget().updateAll(context)
+        widgetRefresher.refresh()
 
         val result = flushPending().resultForCaller()
         if (result is EditResult.Queued) {
@@ -139,7 +135,7 @@ class TaskEditRepository @Inject constructor(
             }
         }
 
-        AgendaWidget().updateAll(context)
+        widgetRefresher.refresh()
 
         // Deliberately schedules nothing: SyncRepository.sync() calls this,
         // and asking for a sync from here would mean a failing flush kept
