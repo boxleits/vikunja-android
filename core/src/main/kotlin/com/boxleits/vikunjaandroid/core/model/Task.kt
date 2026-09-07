@@ -21,4 +21,10 @@ data class Task(
     val endDate: Instant?,
     val labels: List<Label>,
     val position: Double,
+    /**
+     * When the server last changed this task. Vikunja has no ETag or version
+     * column, so this timestamp is the only thing available to tell whether a
+     * task moved on since an edit was made against it.
+     */
+    val updatedAt: Instant? = null,
 )

@@ -2,10 +2,14 @@ package com.boxleits.vikunjaandroid.data.local
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+import com.boxleits.vikunjaandroid.data.local.dao.ConflictNoticeDao
 import com.boxleits.vikunjaandroid.data.local.dao.LabelDao
 import com.boxleits.vikunjaandroid.data.local.dao.PendingEditDao
 import com.boxleits.vikunjaandroid.data.local.dao.ProjectDao
 import com.boxleits.vikunjaandroid.data.local.dao.TaskDao
+import com.boxleits.vikunjaandroid.data.local.entity.ConflictNoticeEntity
 import com.boxleits.vikunjaandroid.data.local.entity.LabelEntity
 import com.boxleits.vikunjaandroid.data.local.entity.PendingEditEntity
 import com.boxleits.vikunjaandroid.data.local.entity.ProjectEntity
@@ -19,8 +23,9 @@ import com.boxleits.vikunjaandroid.data.local.entity.TaskLabelCrossRef
         LabelEntity::class,
         TaskLabelCrossRef::class,
         PendingEditEntity::class,
+        ConflictNoticeEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -28,4 +33,27 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun labelDao(): LabelDao
     abstract fun pendingEditDao(): PendingEditDao
+    abstract fun conflictNoticeDao(): ConflictNoticeDao
+}
+
+/**
+ * Written by hand rather than falling back to a destructive migration, because
+ * pending_edits is no longer necessarily empty: it can hold edits the user made
+ * and the server hasn't taken yet, and dropping the table would throw those
+ * away without telling anyone. Both new columns are nullable, so the ALTERs
+ * need no default and existing rows simply have no recorded base version —
+ * which the flush treats as "can't tell", not as a conflict.
+ */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE tasks ADD COLUMN updatedAtEpochMs INTEGER")
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN baseUpdatedAtEpochMs INTEGER")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `conflict_notices` (" +
+                "`taskId` INTEGER NOT NULL, " +
+                "`taskTitle` TEXT NOT NULL, " +
+                "`detectedAtEpochMs` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`taskId`))",
+        )
+    }
 }

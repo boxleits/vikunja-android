@@ -3,6 +3,8 @@ package com.boxleits.vikunjaandroid.di
 import android.content.Context
 import androidx.room.Room
 import com.boxleits.vikunjaandroid.data.local.AppDatabase
+import com.boxleits.vikunjaandroid.data.local.MIGRATION_2_3
+import com.boxleits.vikunjaandroid.data.local.dao.ConflictNoticeDao
 import com.boxleits.vikunjaandroid.data.local.dao.LabelDao
 import com.boxleits.vikunjaandroid.data.local.dao.PendingEditDao
 import com.boxleits.vikunjaandroid.data.local.dao.ProjectDao
@@ -22,15 +24,13 @@ object DatabaseModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "vikunja.db")
-            // Everything here except pending_edits is a cache that the next
-            // sync rebuilds, so dropping it on a schema change is cheap.
-            //
-            // Caveat worth keeping in view: pending_edits is NOT cache — it
-            // holds edits the server hasn't accepted. It is empty at the
-            // upgrade that introduces it, so nothing is lost this time, but
-            // once users have queued work a destructive migration would
-            // discard it silently. The next schema change needs a real
-            // migration, not this.
+            // pending_edits is not cache — it holds edits the server hasn't
+            // accepted — so schema changes from here on get a real migration
+            // rather than dropping the user's queued work on the floor.
+            .addMigrations(MIGRATION_2_3)
+            // Still here for a downgrade or a version with no path, where the
+            // alternative is refusing to open the database at all. Everything
+            // except pending_edits is a cache the next sync rebuilds.
             .fallbackToDestructiveMigration()
             .build()
 
@@ -45,4 +45,7 @@ object DatabaseModule {
 
     @Provides
     fun providePendingEditDao(database: AppDatabase): PendingEditDao = database.pendingEditDao()
+
+    @Provides
+    fun provideConflictNoticeDao(database: AppDatabase): ConflictNoticeDao = database.conflictNoticeDao()
 }

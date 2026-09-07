@@ -29,6 +29,13 @@ data class PendingEditEntity(
     val done: Boolean,
     val previousDone: Boolean,
     val previousDoneAtEpochMs: Long?,
+    /**
+     * The task's server `updated` stamp when the edit was made. If the server's
+     * differs at flush time, somebody else got there first. Null for an edit
+     * queued before the row carried a version, which skips the check rather
+     * than treating it as a permanent conflict.
+     */
+    val baseUpdatedAtEpochMs: Long?,
     val createdAtEpochMs: Long,
     val attempts: Int = 0,
     val lastErrorMessage: String? = null,

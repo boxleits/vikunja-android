@@ -117,19 +117,38 @@ elsewhere.
 
 ### Conflicts
 
-Not handled. If a task changed on the server *and* locally, the queued edit is
-pushed on top without noticing — last writer wins, and the loser isn't told.
+**The server wins, and the user is told.**
 
-Vikunja offers nothing to build on here: tasks carry no version or ETag, and
-the update endpoint has no `If-Match`, so a conflict can't be detected
-server-side at all. Doing better means comparing the task's `updated`
-timestamp against the one held when the edit was queued, and deciding
-client-side. That's the next real piece of sync work.
+Vikunja has nothing to build on server-side: tasks carry no version or ETag,
+and the update endpoint has no `If-Match`, so it will always accept a stale
+write. Detection therefore happens client-side, using the task's `updated`
+timestamp as its version.
 
-Two things keep the blast radius small for now: the only editable field is
-`done`, and it's written read-modify-write (fetch the task, flip one field,
-post it back), so a concurrent change to any *other* field is picked up by
-that read rather than overwritten.
+A queued edit records the `updated` stamp the task had when the edit was made.
+The write is already a read-modify-write — fetch the task, flip one field, post
+it back — so the fetch doubles as the check, and detecting a conflict costs no
+extra request:
+
+| At flush time | Result |
+|---|---|
+| Server's `updated` matches the recorded one | The write goes ahead |
+| It differs | **No POST is sent.** The edit is dropped, the server's version replaces the local row, and a notice is stored |
+| No recorded base (edit queued by an older build) | Check skipped — can't tell, so don't guess |
+
+The local edit is discarded rather than merged. With a single boolean at stake
+there is nothing to merge, and keeping the local value quietly is exactly the
+silent overwrite the check exists to prevent.
+
+Notices are stored in the database, not raised in the moment: the flush that
+finds a conflict usually runs in a background worker with no UI attached, so
+the news has to wait until the app is next opened. It then appears as a dialog
+naming the affected tasks — a dialog rather than a snackbar, because a change
+of the user's was thrown away and a message that vanishes on its own is the
+wrong way to say so.
+
+Repeated toggles of one task collapse into a single queued edit, and the
+recorded base version stays the one from before the *first* edit — the version
+the user was actually looking at.
 
 ## Authentication
 
@@ -202,7 +221,7 @@ the Gradle Plugin Portal were reachable.
 Practical effect:
 - **`:core`** is pure Kotlin/JVM (Retrofit, OkHttp, kotlinx.serialization/
   coroutines/datetime — all Maven Central). It was fully compiled and its
-  **43 unit tests were run and pass** in that environment
+  **47 unit tests were run and pass** in that environment
   (`./gradlew :core:test`).
 
   Reaching that point needed AGP kept out of the root `plugins {}` block,
@@ -234,8 +253,10 @@ Roughly in order:
 
 1. More editing: change priority, labels and dates from the outline
    (toggling done is in, and rides the same queue).
-2. Conflict handling — see [Conflicts](#conflicts). Needs an `updated`
-   timestamp comparison client-side, since Vikunja has no ETag to rely on.
+2. Conflict handling for richer edits. Detection is in (see
+   [Conflicts](#conflicts)); once text fields are editable, "server wins" stops
+   being good enough and the losing version needs to be kept and shown rather
+   than dropped.
 3. Quick-capture (an "Inbox" project, fast add from outside the app).
 4. Swipe gestures for state/priority changes, notifications for due tasks.
 5. Encrypted token storage.
