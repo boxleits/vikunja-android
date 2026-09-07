@@ -98,8 +98,38 @@ connectivity-constrained one-shot sync, and the periodic sync flushes the
 queue too. `flushPending()` deliberately schedules nothing itself, so a
 failing flush can't re-trigger the sync that called it.
 
-Not handled yet: a genuine conflict. If a task changed on the server *and*
-locally, the queued edit is pushed on top without noticing.
+### What triggers a sync
+
+| Trigger | When |
+|---|---|
+| Onboarding | Right after connecting |
+| Pull to refresh, *Sync now* | On demand |
+| Foreground | Opening the app, if the cache is more than a minute old |
+| Periodic | Every 30 minutes, with a connection |
+| Queued edit | As soon as there's a connection, to flush the backlog |
+
+There is deliberately no push channel. Instant sync would mean either Google's
+push service, or a separate distributor app on the phone to hold the
+connection — Android gives a normal app no cheap way to keep one open. Since
+opening the app already refreshes it, the remaining window that push would
+cover is small: the app sitting open in front of you while something changes
+elsewhere.
+
+### Conflicts
+
+Not handled. If a task changed on the server *and* locally, the queued edit is
+pushed on top without noticing — last writer wins, and the loser isn't told.
+
+Vikunja offers nothing to build on here: tasks carry no version or ETag, and
+the update endpoint has no `If-Match`, so a conflict can't be detected
+server-side at all. Doing better means comparing the task's `updated`
+timestamp against the one held when the edit was queued, and deciding
+client-side. That's the next real piece of sync work.
+
+Two things keep the blast radius small for now: the only editable field is
+`done`, and it's written read-modify-write (fetch the task, flip one field,
+post it back), so a concurrent change to any *other* field is picked up by
+that read rather than overwritten.
 
 ## Authentication
 
@@ -172,7 +202,7 @@ the Gradle Plugin Portal were reachable.
 Practical effect:
 - **`:core`** is pure Kotlin/JVM (Retrofit, OkHttp, kotlinx.serialization/
   coroutines/datetime — all Maven Central). It was fully compiled and its
-  **20 unit tests were run and pass** in that environment
+  **43 unit tests were run and pass** in that environment
   (`./gradlew :core:test`).
 
   Reaching that point needed AGP kept out of the root `plugins {}` block,
@@ -204,9 +234,8 @@ Roughly in order:
 
 1. More editing: change priority, labels and dates from the outline
    (toggling done is in, and rides the same queue).
-2. Conflict handling. The queue protects local edits from being overwritten
-   by a sync, but the server still wins on a genuine conflict — if a task
-   changed on both sides, the queued edit is pushed on top without noticing.
+2. Conflict handling — see [Conflicts](#conflicts). Needs an `updated`
+   timestamp comparison client-side, since Vikunja has no ETag to rely on.
 3. Quick-capture (an "Inbox" project, fast add from outside the app).
 4. Swipe gestures for state/priority changes, notifications for due tasks.
 5. Encrypted token storage.
