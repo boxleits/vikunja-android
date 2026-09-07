@@ -7,6 +7,7 @@ import com.boxleits.vikunjaandroid.data.settings.VikunjaSettings
 import com.boxleits.vikunjaandroid.data.sync.SyncRepository
 import com.boxleits.vikunjaandroid.data.sync.SyncResult
 import com.boxleits.vikunjaandroid.data.sync.SyncScheduler
+import com.boxleits.vikunjaandroid.data.sync.TaskEditRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,6 +23,7 @@ class SettingsViewModel @Inject constructor(
     settingsRepository: SettingsRepository,
     private val syncRepository: SyncRepository,
     private val syncScheduler: SyncScheduler,
+    taskEditRepository: TaskEditRepository,
 ) : ViewModel() {
 
     val settings: StateFlow<VikunjaSettings?> = settingsRepository.settingsFlow
@@ -29,6 +31,10 @@ class SettingsViewModel @Inject constructor(
 
     val lastSyncedAt: StateFlow<Instant?> = settingsRepository.lastSyncedAtFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** Edits applied on this device that the server hasn't accepted yet. */
+    val pendingEditCount: StateFlow<Int> = taskEditRepository.observePendingCount()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()

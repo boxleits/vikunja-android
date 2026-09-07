@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
@@ -14,6 +15,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val PERIODIC_SYNC_WORK_NAME = "vikunja_periodic_sync"
+private const val IMMEDIATE_SYNC_WORK_NAME = "vikunja_immediate_sync"
 
 @Singleton
 class SyncScheduler @Inject constructor(@ApplicationContext private val context: Context) {
@@ -37,11 +39,19 @@ class SyncScheduler @Inject constructor(@ApplicationContext private val context:
         WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_SYNC_WORK_NAME)
     }
 
-    /** Runs one sync immediately in the background, e.g. right after onboarding. */
+    /**
+     * Runs one sync as soon as there's a network — after onboarding, or to
+     * retry edits that couldn't be sent.
+     *
+     * Unique work with KEEP: several edits made offline should wait on one
+     * pending run, not queue a run each.
+     */
     fun requestImmediateSync() {
         val request = OneTimeWorkRequestBuilder<SyncWorker>()
             .setConstraints(networkConstraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
-        WorkManager.getInstance(context).enqueue(request)
+        WorkManager.getInstance(context)
+            .enqueueUniqueWork(IMMEDIATE_SYNC_WORK_NAME, ExistingWorkPolicy.KEEP, request)
     }
 }

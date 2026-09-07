@@ -47,13 +47,16 @@ class OutlineViewModel @Inject constructor(
 
     /**
      * The repository flips the row locally first, so the checkbox reacts
-     * immediately and reverts by itself if the server rejects the change.
+     * immediately. A change that can't reach the server right now stays
+     * applied and queued; only an outright rejection rolls it back.
      */
     fun setDone(taskId: Long, done: Boolean) {
         viewModelScope.launch {
             when (val result = taskEditRepository.setDone(taskId, done)) {
-                is EditResult.Error -> _errorMessage.value = result.message
-                EditResult.Success -> Unit
+                EditResult.Synced -> Unit
+                is EditResult.Queued ->
+                    _errorMessage.value = "Saved on this device — will sync when possible (${result.reason})"
+                is EditResult.Rejected -> _errorMessage.value = result.message
             }
         }
     }

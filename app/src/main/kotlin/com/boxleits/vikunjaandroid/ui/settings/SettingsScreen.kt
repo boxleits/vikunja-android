@@ -34,6 +34,7 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val lastSyncedAt by viewModel.lastSyncedAt.collectAsStateWithLifecycle()
     val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
+    val pendingEditCount by viewModel.pendingEditCount.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -66,6 +67,19 @@ fun SettingsScreen(
                 text = lastSyncedAt?.toString() ?: "Never",
                 style = MaterialTheme.typography.bodyLarge,
             )
+
+            if (pendingEditCount > 0) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "Waiting to sync", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = if (pendingEditCount == 1) {
+                        "1 change made on this device"
+                    } else {
+                        "$pendingEditCount changes made on this device"
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
 
             errorMessage?.let { message ->
                 Spacer(modifier = Modifier.height(16.dp))

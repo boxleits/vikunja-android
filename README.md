@@ -10,10 +10,12 @@ into a local database and renders them. The **one edit it supports is
 ticking a task done or not-done from the outline** — creating tasks and
 editing anything else is still to come (see [Roadmap](#roadmap)).
 
-That write goes straight to the server: it's applied locally first so the
-checkbox reacts immediately, then sent, and reverted if the server rejects
-it. There is **no offline queue**, so a tick made with no connection fails
-and undoes itself rather than syncing later.
+Edits are applied locally first so the UI reacts immediately, then queued
+and pushed. A change that can't be sent right now — no connection, server
+down — stays applied and waits in the queue; only a change the server
+actually rejects is rolled back. The queue survives a restart, and a sync
+re-applies anything still in it so the full-snapshot refresh can't
+overwrite work that hasn't been sent yet.
 
 ## Why it looks the way it does
 
@@ -59,6 +61,44 @@ The split is deliberate: everything that doesn't need the Android
 framework — parsing, mapping, the outline/agenda algorithms, the HTTP
 client — lives in `:core`, where it's fast to test and easy to reason
 about. `:app` is the thin Android shell around it.
+
+## How syncing and editing fit together
+
+Reads are one-way and wholesale: each sync fetches every project, label and
+task and replaces the local database in a single transaction. The UI only
+ever observes Room, so the app works offline with the last synced data.
+
+Writes go through a queue (`pending_edits`):
+
+1. The edit is applied to the local row, so the UI reacts at once.
+2. It's queued, with the row's previous value recorded alongside it.
+3. It's pushed immediately if possible.
+
+What happens next depends on *why* a push failed, which
+`VikunjaSyncException.isRetryable()` decides:
+
+| Outcome | Queue | Local row |
+|---|---|---|
+| Accepted | dropped | overwritten with the server's version |
+| Offline, 5xx, 429, 401 | kept, retried later | keeps the edit |
+| 4xx (task gone, payload refused) | dropped | rolled back to the recorded previous value |
+
+Two details keep the queue and the wholesale replace from fighting:
+
+- A sync **re-applies queued edits** after replacing the tables, inside the
+  same transaction, so the server snapshot can't undo a change that hasn't
+  been sent.
+- A repeated toggle of the same task **collapses into one queued edit**
+  (unique index on task + kind), and the recorded "previous" value stays the
+  one from before the first edit, so a rollback lands where it should.
+
+Retries ride the existing sync work: a queued edit schedules a
+connectivity-constrained one-shot sync, and the periodic sync flushes the
+queue too. `flushPending()` deliberately schedules nothing itself, so a
+failing flush can't re-trigger the sync that called it.
+
+Not handled yet: a genuine conflict. If a task changed on the server *and*
+locally, the queued edit is pushed on top without noticing.
 
 ## Authentication
 
@@ -162,11 +202,10 @@ Practical effect:
 Roughly in order:
 
 1. More editing: change priority, labels and dates from the outline
-   (toggling done is in).
-2. Two-way sync with an offline edit queue and conflict handling. Needed
-   before edits can be trusted: the periodic sync replaces the local
-   database wholesale, so any write that hasn't reached the server yet is
-   lost when it runs.
-4. Quick-capture (an "Inbox" project, fast add from outside the app).
-5. Swipe gestures for state/priority changes, notifications for due tasks.
-6. Encrypted token storage.
+   (toggling done is in, and rides the same queue).
+2. Conflict handling. The queue protects local edits from being overwritten
+   by a sync, but the server still wins on a genuine conflict — if a task
+   changed on both sides, the queued edit is pushed on top without noticing.
+3. Quick-capture (an "Inbox" project, fast add from outside the app).
+4. Swipe gestures for state/priority changes, notifications for due tasks.
+5. Encrypted token storage.
