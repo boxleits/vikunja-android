@@ -194,18 +194,30 @@ Run just the pure-Kotlin module (no Android SDK required):
 `.github/workflows/build.yml` runs on every push to `master` and on every PR:
 one job runs `:core:test`, another assembles the debug APK. Both pin JDK 17.
 
-The APK is published two ways. The **`debug-latest` pre-release** always
-carries the newest build, at a stable direct-download URL:
+The **`debug-latest` pre-release** always carries the newest build, at stable
+direct-download URLs — two of them:
 
-<https://github.com/boxleits/vikunja-android/releases/download/debug-latest/app-debug.apk>
+| | |
+|---|---|
+| [`app-debug.apk`](https://github.com/boxleits/vikunja-android/releases/download/debug-latest/app-debug.apk) | Unminified. Everyday testing. |
+| [`app-release.apk`](https://github.com/boxleits/vikunja-android/releases/download/debug-latest/app-release.apk) | Minified by R8. **Use this to judge performance.** |
 
-It's also attached to each run as a build artifact, which keeps per-run
-history but downloads as a zip — the release asset is the one to grab by
-hand.
+The distinction matters more than it looks. Compose in a debug build is
+materially slower than in a minified one, so scroll smoothness measured on a
+debug APK largely reports the build type rather than the code — Google's own
+guidance is to profile release builds only. Both are attached to each run as
+build artifacts too, which keeps per-run history but downloads as a zip.
 
-Debug builds are signed with the checked-in `app/debug.keystore`, so
-successive builds install over one another instead of forcing an
-uninstall. That key is not a secret and must never sign a release build.
+Both are signed with the checked-in `app/debug.keystore`, so they install over
+one another and over previous builds without losing local data. That key is not
+a secret; a genuinely distributable release needs a real key kept out of the
+repository, so `app-release.apk` here is a measurement tool, not a shippable
+artifact.
+
+R8 can break what a compiler cannot see. `app/proguard-rules.pro` keeps the
+serializable DTOs, the Retrofit interface and the widget classes for that
+reason; if the minified build misbehaves where the debug one doesn't, that file
+is the first place to look.
 
 ### Dev container
 

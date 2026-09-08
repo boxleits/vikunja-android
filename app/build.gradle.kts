@@ -40,8 +40,20 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Minified and resource-shrunk, because the point of this build is
+            // to be measurable: Compose in a debug build is materially slower,
+            // and judging scroll performance there measures the build type more
+            // than the code.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+
+            // Signed with the debug key so it installs over the debug build
+            // instead of being unsigned and uninstallable — same applicationId
+            // and same signature, so local data survives switching between
+            // them. This is emphatically NOT a distributable release build;
+            // shipping one needs a real key kept out of the repository.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
