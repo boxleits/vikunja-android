@@ -6,11 +6,14 @@ import com.boxleits.vikunjaandroid.core.repository.VikunjaSyncException
 import com.boxleits.vikunjaandroid.core.repository.isRetryable
 import com.boxleits.vikunjaandroid.data.local.AppDatabase
 import com.boxleits.vikunjaandroid.data.local.entity.ConflictNoticeEntity
+import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_CREATE_TASK
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_SET_DONE
 import com.boxleits.vikunjaandroid.data.local.entity.PendingEditEntity
 import com.boxleits.vikunjaandroid.data.local.entity.toEntity
+import com.boxleits.vikunjaandroid.data.local.entity.toPlaceholderTask
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import androidx.room.withTransaction
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import javax.inject.Inject
@@ -61,6 +64,49 @@ class TaskEditRepository @Inject constructor(
 
     suspend fun acknowledgeConflicts() {
         database.conflictNoticeDao().deleteAll()
+    }
+
+    /**
+     * Creates a task, immediately and locally, then queues it for the server.
+     *
+     * The row appears at once under a placeholder id so the outline reacts the
+     * way it does for every other edit. That placeholder is the whole
+     * difficulty of creating offline, as opposed to editing offline: an edit
+     * names a task the server already knows, while a creation has to invent an
+     * identity and later reconcile it with the one the server assigns.
+     */
+    suspend fun createTask(projectId: Long, title: String): EditResult {
+        val trimmed = title.trim()
+        if (trimmed.isEmpty()) return EditResult.Rejected("A task needs a title.")
+
+        val taskDao = database.taskDao()
+        val now = Clock.System.now()
+
+        val placeholderId = database.withTransaction {
+            // Negative, and below every id already present, so it collides
+            // neither with Vikunja's ids nor with another placeholder.
+            val id = minOf(taskDao.lowestId() ?: 0L, 0L) - 1
+            val edit = PendingEditEntity(
+                taskId = id,
+                type = EDIT_TYPE_CREATE_TASK,
+                done = false,
+                previousDone = false,
+                previousDoneAtEpochMs = null,
+                baseUpdatedAtEpochMs = null,
+                title = trimmed,
+                projectId = projectId,
+                createdAtEpochMs = now.toEpochMilliseconds(),
+            )
+            taskDao.upsert(edit.toPlaceholderTask())
+            database.pendingEditDao().upsert(edit)
+            id
+        }
+        check(placeholderId < 0)
+        widgetRefresher.refresh()
+
+        val result = flushPending().resultForCaller()
+        if (result is EditResult.Queued) syncScheduler.requestImmediateSync()
+        return result
     }
 
     suspend fun setDone(taskId: Long, done: Boolean): EditResult {
@@ -138,6 +184,23 @@ class TaskEditRepository @Inject constructor(
 
         for (edit in queued) {
             try {
+                if (edit.type == EDIT_TYPE_CREATE_TASK) {
+                    val created = remote.createTask(
+                        projectId = requireNotNull(edit.projectId) { "a queued create must know its project" },
+                        title = requireNotNull(edit.title) { "a queued create must know its title" },
+                    )
+                    database.withTransaction {
+                        // The placeholder is replaced rather than updated: its
+                        // id is the primary key, and the server's id is a
+                        // different row as far as the database is concerned.
+                        taskDao.deleteById(edit.taskId)
+                        taskDao.upsert(created.toEntity())
+                        pendingDao.deleteById(edit.id)
+                    }
+                    pushed++
+                    continue
+                }
+
                 val outcome = remote.setTaskDone(
                     taskId = edit.taskId,
                     done = edit.done,
@@ -180,6 +243,16 @@ class TaskEditRepository @Inject constructor(
                 if (e.isRetryable()) {
                     pendingDao.recordFailedAttempt(edit.id, e.message)
                     stillQueued++
+                } else if (edit.type == EDIT_TYPE_CREATE_TASK) {
+                    // A create the server refuses has no earlier state to
+                    // return to — the placeholder was never anything else, so
+                    // it goes with the edit rather than lingering as a task
+                    // that will never exist.
+                    database.withTransaction {
+                        taskDao.deleteById(edit.taskId)
+                        pendingDao.deleteById(edit.id)
+                    }
+                    rejected++
                 } else {
                     // Never going to succeed: undo it locally so the user
                     // isn't left looking at a change that will never stick.

@@ -9,6 +9,7 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -274,4 +275,69 @@ class RemoteVikunjaRepositoryTest {
 
         assertThat(exception).isInstanceOf(VikunjaSyncException.Unauthorized::class.java)
     }
+
+    @Test
+    fun `createTask puts the title to the project's task collection`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"id":42,"project_id":3,"title":"Buy milk"}"""))
+
+        val task = repository.createTask(projectId = 3, title = "Buy milk")
+
+        val request = server.takeRequest()
+        // PUT creates and POST updates in Vikunja — the reverse of the usual
+        // convention, so this assertion is the guard against "fixing" it.
+        assertThat(request.method).isEqualTo("PUT")
+        assertThat(request.path).isEqualTo("/api/v1/projects/3/tasks")
+        val sent = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertThat(sent["title"]!!.jsonPrimitive.content).isEqualTo("Buy milk")
+
+        assertThat(task.id).isEqualTo(42L)
+        assertThat(task.title).isEqualTo("Buy milk")
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `createTask hangs the new task under a parent with a second request`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"id":42,"project_id":3,"title":"Sub"}"""))
+        server.enqueue(MockResponse().setBody("""{"other_task_id":7,"relation_kind":"parenttask"}"""))
+
+        val task = repository.createTask(projectId = 3, title = "Sub", parentTaskId = 7)
+
+        server.takeRequest() // the create
+        val relationRequest = server.takeRequest()
+        assertThat(relationRequest.method).isEqualTo("PUT")
+        assertThat(relationRequest.path).isEqualTo("/api/v1/tasks/42/relations")
+        val sent = Json.parseToJsonElement(relationRequest.body.readUtf8()).jsonObject
+        assertThat(sent["other_task_id"]!!.jsonPrimitive.long).isEqualTo(7L)
+        assertThat(sent["relation_kind"]!!.jsonPrimitive.content).isEqualTo("parenttask")
+
+        // The returned task carries the parent the caller asked for, since the
+        // create response predates the relation and doesn't mention it.
+        assertThat(task.parentTaskId).isEqualTo(7L)
+    }
+
+    @Test
+    fun `createTask sends no relation request when there is no parent`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"id":42,"project_id":3,"title":"Top level"}"""))
+
+        val task = repository.createTask(projectId = 3, title = "Top level", parentTaskId = null)
+
+        assertThat(task.parentTaskId).isNull()
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `createTask surfaces a rejected create`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(403).setBody("""{"message":"no write access"}"""))
+
+        val exception = try {
+            repository.createTask(projectId = 3, title = "Nope")
+            null
+        } catch (e: VikunjaSyncException) {
+            e
+        }
+
+        assertThat(exception).isInstanceOf(VikunjaSyncException.Server::class.java)
+        assertThat((exception as VikunjaSyncException.Server).statusCode).isEqualTo(403)
+    }
+
 }

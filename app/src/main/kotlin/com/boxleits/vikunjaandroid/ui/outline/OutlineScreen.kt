@@ -1,16 +1,26 @@
 package com.boxleits.vikunjaandroid.ui.outline
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -35,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.boxleits.vikunjaandroid.core.model.Project
 import com.boxleits.vikunjaandroid.core.outline.OutlineNode
 import com.boxleits.vikunjaandroid.data.sync.ProjectOutline
 import com.boxleits.vikunjaandroid.data.sync.TaskConflict
@@ -44,6 +56,82 @@ import com.boxleits.vikunjaandroid.ui.components.OutlineTaskRow
  * Tells the user that edits of theirs were dropped in favour of the server's
  * newer version, and which tasks it happened to.
  */
+/**
+ * Capture: a title, and which project it lands in.
+ *
+ * Deliberately the smallest thing that works. Everything else a task can carry
+ * — dates, priority, labels — is an edit after the fact, and making capture
+ * wait for those decisions is how a quick-add stops being quick.
+ */
+@Composable
+private fun CreateTaskDialog(
+    projects: List<Project>,
+    defaultProjectId: suspend () -> Long?,
+    onDismiss: () -> Unit,
+    onCreate: (projectId: Long, title: String) -> Unit,
+) {
+    var title by rememberSaveable { mutableStateOf("") }
+    var selectedProjectId by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    // Resolved once: the project last captured into, which is nearly always
+    // the one wanted again.
+    LaunchedEffect(Unit) {
+        if (selectedProjectId == null) selectedProjectId = defaultProjectId()
+    }
+
+    val projectId = selectedProjectId ?: projects.firstOrNull()?.id
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New task") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                if (projects.size > 1) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = "Project", style = MaterialTheme.typography.labelLarge)
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        projects.forEach { project ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedProjectId = project.id },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                RadioButton(
+                                    selected = project.id == projectId,
+                                    onClick = { selectedProjectId = project.id },
+                                )
+                                Text(text = project.title, style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { projectId?.let { onCreate(it, title) } },
+                enabled = title.isNotBlank() && projectId != null,
+            ) {
+                Text("Add")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 @Composable
 private fun ConflictDialog(
     conflicts: List<TaskConflict>,
@@ -92,6 +180,19 @@ fun OutlineScreen(viewModel: OutlineViewModel = hiltViewModel()) {
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
     val conflicts by viewModel.conflicts.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    var showCreate by rememberSaveable { mutableStateOf(false) }
+
+    if (showCreate) {
+        CreateTaskDialog(
+            projects = projectOutlines.map { it.project },
+            defaultProjectId = { viewModel.defaultProjectId() },
+            onDismiss = { showCreate = false },
+            onCreate = { projectId, title ->
+                viewModel.createTask(projectId, title)
+                showCreate = false
+            },
+        )
+    }
 
     // A dialog rather than a snackbar: the user's change was thrown away, and
     // a message that disappears on its own is the wrong way to say so.
@@ -118,6 +219,15 @@ fun OutlineScreen(viewModel: OutlineViewModel = hiltViewModel()) {
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            // Only offered once a project exists to put a task in — Vikunja
+            // has no notion of a task without one.
+            if (projectOutlines.isNotEmpty()) {
+                FloatingActionButton(onClick = { showCreate = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "New task")
+                }
+            }
+        },
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = isRefreshing,

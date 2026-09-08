@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.boxleits.vikunjaandroid.data.sync.EditResult
 import com.boxleits.vikunjaandroid.data.sync.ProjectOutline
+import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
 import com.boxleits.vikunjaandroid.data.sync.SyncRepository
 import com.boxleits.vikunjaandroid.data.sync.SyncResult
 import com.boxleits.vikunjaandroid.data.sync.TaskEditRepository
@@ -11,6 +12,7 @@ import com.boxleits.vikunjaandroid.data.sync.TaskConflict
 import com.boxleits.vikunjaandroid.data.sync.TaskQueryRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +23,7 @@ import javax.inject.Inject
 @HiltViewModel
 class OutlineViewModel @Inject constructor(
     taskQueryRepository: TaskQueryRepository,
+    private val settingsRepository: SettingsRepository,
     private val syncRepository: SyncRepository,
     private val taskEditRepository: TaskEditRepository,
 ) : ViewModel() {
@@ -77,6 +80,34 @@ class OutlineViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Creates a task and remembers the project, so capturing the next one is
+     * one tap rather than a choice.
+     *
+     * The repository writes it locally first, so it appears whether or not the
+     * server can be reached; a creation that has to wait says so exactly like
+     * a queued edit does.
+     */
+    fun createTask(projectId: Long, title: String) {
+        viewModelScope.launch {
+            when (val result = taskEditRepository.createTask(projectId, title)) {
+                EditResult.Synced -> settingsRepository.setLastProjectId(projectId)
+                EditResult.Conflicted -> Unit
+                is EditResult.Queued -> {
+                    settingsRepository.setLastProjectId(projectId)
+                    _errorMessage.value = "Saved on this device — will sync when possible (${result.reason})"
+                }
+                is EditResult.Rejected -> _errorMessage.value = result.message
+            }
+        }
+    }
+
+    /** The project to offer first when creating: the last one used, else the first. */
+    suspend fun defaultProjectId(): Long? =
+        settingsRepository.lastProjectIdFlow.first()
+            ?.takeIf { remembered -> outline.value.any { it.project.id == remembered } }
+            ?: outline.value.firstOrNull()?.project?.id
 
     fun dismissError() {
         _errorMessage.value = null

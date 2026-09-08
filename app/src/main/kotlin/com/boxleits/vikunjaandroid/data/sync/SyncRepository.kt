@@ -4,7 +4,9 @@ import androidx.room.withTransaction
 import com.boxleits.vikunjaandroid.core.repository.RemoteVikunjaRepository
 import com.boxleits.vikunjaandroid.core.repository.VikunjaSyncException
 import com.boxleits.vikunjaandroid.data.local.AppDatabase
+import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_CREATE_TASK
 import com.boxleits.vikunjaandroid.data.local.entity.TaskLabelCrossRef
+import com.boxleits.vikunjaandroid.data.local.entity.toPlaceholderTask
 import com.boxleits.vikunjaandroid.data.local.entity.toEntity
 import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
 import javax.inject.Inject
@@ -44,11 +46,17 @@ class SyncRepository @Inject constructor(
                 // re-applying those edits, this replace would silently undo
                 // a change the user made and is still waiting to send.
                 database.pendingEditDao().getAll().forEach { edit ->
-                    database.taskDao().updateDone(
-                        id = edit.taskId,
-                        done = edit.done,
-                        doneAtEpochMs = if (edit.done) edit.createdAtEpochMs else null,
-                    )
+                    when (edit.type) {
+                        // A task the server has never seen is not in the
+                        // snapshot, so the replace above just deleted it.
+                        EDIT_TYPE_CREATE_TASK -> database.taskDao().upsert(edit.toPlaceholderTask())
+
+                        else -> database.taskDao().updateDone(
+                            id = edit.taskId,
+                            done = edit.done,
+                            doneAtEpochMs = if (edit.done) edit.createdAtEpochMs else null,
+                        )
+                    }
                 }
             }
 
