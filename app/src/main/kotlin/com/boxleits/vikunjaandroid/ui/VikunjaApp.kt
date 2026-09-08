@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -49,15 +50,9 @@ private fun MainScaffold() {
             startDestination = VikunjaDestinations.OUTLINE,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable(VikunjaDestinations.OUTLINE) {
-                OutlineScreen(onOpenSettings = { navController.navigate(VikunjaDestinations.SETTINGS) })
-            }
-            composable(VikunjaDestinations.AGENDA) {
-                AgendaScreen(onOpenSettings = { navController.navigate(VikunjaDestinations.SETTINGS) })
-            }
-            composable(VikunjaDestinations.SETTINGS) {
-                SettingsScreen(onBack = { navController.popBackStack() })
-            }
+            composable(VikunjaDestinations.OUTLINE) { OutlineScreen() }
+            composable(VikunjaDestinations.AGENDA) { AgendaScreen() }
+            composable(VikunjaDestinations.SETTINGS) { SettingsScreen() }
         }
     }
 }
@@ -80,9 +75,23 @@ private fun VikunjaBottomBar(navController: NavHostController) {
             icon = { Icon(Icons.Filled.DateRange, contentDescription = null) },
             label = { Text("Agenda") },
         )
+        NavigationBarItem(
+            selected = currentRoute == VikunjaDestinations.SETTINGS,
+            onClick = { navController.navigateToTab(VikunjaDestinations.SETTINGS) },
+            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+            label = { Text("Settings") },
+        )
     }
 }
 
+/**
+ * Settings is a sibling of the two lists, not a screen pushed on top of one.
+ *
+ * It used to be pushed, and that read wrongly in use: switching tabs from
+ * Settings and back brought Settings *back* rather than the list, because
+ * saveState/restoreState faithfully restored the stack it had been sitting on.
+ * Three destinations at the same level have no stack to confuse.
+ */
 private fun NavHostController.navigateToTab(route: String) {
     navigate(route) {
         popUpTo(graph.findStartDestination().id) { saveState = true }

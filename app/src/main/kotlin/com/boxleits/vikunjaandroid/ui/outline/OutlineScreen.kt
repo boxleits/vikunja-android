@@ -10,7 +10,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -87,10 +86,7 @@ private fun ConflictDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OutlineScreen(
-    onOpenSettings: () -> Unit,
-    viewModel: OutlineViewModel = hiltViewModel(),
-) {
+fun OutlineScreen(viewModel: OutlineViewModel = hiltViewModel()) {
     val projectOutlines by viewModel.outline.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
@@ -117,9 +113,6 @@ fun OutlineScreen(
                 actions = {
                     IconButton(onClick = viewModel::refresh) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Sync now")
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                 },
             )

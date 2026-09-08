@@ -82,11 +82,15 @@ class SettingsViewModel @Inject constructor(
         _errorMessage.value = null
     }
 
-    fun logOut(onDone: () -> Unit) {
+    /**
+     * No callback to leave the screen: clearing the settings makes
+     * AppViewModel.isConfigured false, and the app swaps the whole scaffold for
+     * onboarding on its own.
+     */
+    fun logOut() {
         viewModelScope.launch {
             syncScheduler.cancelPeriodicSync()
             syncRepository.logOut()
-            onDone()
         }
     }
 }
