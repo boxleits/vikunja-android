@@ -2,10 +2,11 @@ package com.boxleits.vikunjaandroid.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.boxleits.vikunjaandroid.core.agenda.WidgetHorizon
+import com.boxleits.vikunjaandroid.core.agenda.AgendaHorizon
+import com.boxleits.vikunjaandroid.core.agenda.AgendaSort
 import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
 import com.boxleits.vikunjaandroid.data.settings.VikunjaSettings
-import com.boxleits.vikunjaandroid.data.settings.WidgetSettings
+import com.boxleits.vikunjaandroid.data.settings.AgendaSettings
 import com.boxleits.vikunjaandroid.data.sync.SyncRepository
 import com.boxleits.vikunjaandroid.data.sync.SyncResult
 import com.boxleits.vikunjaandroid.data.sync.SyncScheduler
@@ -40,21 +41,21 @@ class SettingsViewModel @Inject constructor(
     val pendingEditCount: StateFlow<Int> = taskEditRepository.observePendingCount()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
-    val widgetSettings: StateFlow<WidgetSettings> = settingsRepository.widgetSettingsFlow
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), WidgetSettings.DEFAULT)
+    val agendaSettings: StateFlow<AgendaSettings> = settingsRepository.agendaSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AgendaSettings.DEFAULT)
 
-    fun setWidgetHorizon(horizon: WidgetHorizon) {
+    fun setAgendaHorizon(horizon: AgendaHorizon) {
         viewModelScope.launch {
-            settingsRepository.setWidgetHorizon(horizon)
+            settingsRepository.setAgendaHorizon(horizon)
             // The widget only redraws when asked, so a setting change has to
             // push it rather than wait for the next sync.
             widgetRefresher.refresh()
         }
     }
 
-    fun setWidgetMaxItems(maxItems: Int) {
+    fun setAgendaSort(sort: AgendaSort) {
         viewModelScope.launch {
-            settingsRepository.setWidgetMaxItems(maxItems)
+            settingsRepository.setAgendaSort(sort)
             widgetRefresher.refresh()
         }
     }
@@ -81,11 +82,15 @@ class SettingsViewModel @Inject constructor(
         _errorMessage.value = null
     }
 
-    fun logOut(onDone: () -> Unit) {
+    /**
+     * No callback to leave the screen: clearing the settings makes
+     * AppViewModel.isConfigured false, and the app swaps the whole scaffold for
+     * onboarding on its own.
+     */
+    fun logOut() {
         viewModelScope.launch {
             syncScheduler.cancelPeriodicSync()
             syncRepository.logOut()
-            onDone()
         }
     }
 }

@@ -78,6 +78,7 @@ class SyncRepository @Inject constructor(
             // Queued edits belong to the account being signed out of; keeping
             // them would push one user's changes with the next user's token.
             database.pendingEditDao().deleteAll()
+            database.conflictNoticeDao().deleteAll()
         }
         settingsRepository.clear()
         // Otherwise the widget keeps displaying the logged-out user's tasks.

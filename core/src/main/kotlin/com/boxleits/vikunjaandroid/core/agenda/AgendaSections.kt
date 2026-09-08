@@ -1,6 +1,7 @@
 package com.boxleits.vikunjaandroid.core.agenda
 
 import com.boxleits.vikunjaandroid.core.model.Task
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
@@ -20,6 +21,12 @@ data class AgendaItem(
     val bucket: AgendaBucket,
     /** true if [date] came from the due date, false if it came from the scheduled/start date. */
     val isDueDate: Boolean,
+    /**
+     * The moment [date] was derived from, kept so the UI can show a time of
+     * day. [date] alone drops it, and "due today" reads very differently from
+     * "due today at 09:00" when it is already the afternoon.
+     */
+    val at: Instant,
 )
 
 data class AgendaSections(
@@ -31,6 +38,10 @@ data class AgendaSections(
 ) {
     val isEmpty: Boolean
         get() = overdue.isEmpty() && today.isEmpty() && tomorrow.isEmpty() && thisWeek.isEmpty() && later.isEmpty()
+
+    companion object {
+        val EMPTY = AgendaSections(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+    }
 }
 
 /**
@@ -50,7 +61,7 @@ fun buildAgenda(
             val instant = task.dueDate ?: task.startDate
             instant?.let {
                 val date = it.toLocalDateTime(timeZone).date
-                AgendaItem(task, date, bucketFor(date, today), isDueDate = task.dueDate != null)
+                AgendaItem(task, date, bucketFor(date, today), isDueDate = task.dueDate != null, at = it)
             }
         }
         .toList()
@@ -68,12 +79,69 @@ fun buildAgenda(
     )
 }
 
-/** How far ahead the home screen widget looks. Overdue is always included. */
-enum class WidgetHorizon {
+/**
+ * How far ahead the agenda looks — on the screen and in the widget alike.
+ * Overdue is always included.
+ */
+enum class AgendaHorizon {
     TODAY,
     TOMORROW,
     THIS_WEEK,
     EVERYTHING,
+}
+
+/**
+ * How the agenda orders what it shows.
+ *
+ * Orgzly has no equivalent setting: its widget renders a saved search, and the
+ * ordering rides along in the query string. Without a query language of our
+ * own, an explicit choice is the honest substitute.
+ */
+enum class AgendaSort {
+    /** Soonest first — what an agenda is usually for. */
+    DATE,
+
+    /** Highest priority first, date breaking ties. */
+    PRIORITY,
+
+    /** Alphabetical, for finding a known task by name. */
+    TITLE,
+}
+
+/**
+ * A ceiling on how much the widget builds, not a user setting: the list
+ * scrolls, so there is nothing to gain by cutting it short, but RemoteViews
+ * collections are not free and an unbounded list is a bad idea on a home
+ * screen.
+ */
+const val WIDGET_MAX_ITEMS = 100
+
+internal fun AgendaSort.comparator(): Comparator<AgendaItem> = when (this) {
+    AgendaSort.DATE -> compareBy({ it.date }, { -it.task.priority.value }, { it.task.title })
+    AgendaSort.PRIORITY -> compareBy({ -it.task.priority.value }, { it.date }, { it.task.title })
+    AgendaSort.TITLE -> compareBy({ it.task.title.lowercase() }, { it.date })
+}
+
+/**
+ * The same agenda, narrowed to [horizon] and re-sorted by [sort].
+ *
+ * Used by the agenda screen, which keeps its sections — unlike the widget,
+ * which flattens them. Sections outside the horizon come back empty rather
+ * than being dropped, so the caller still knows which is which. Overdue
+ * survives every horizon: something already late is the last thing to hide.
+ */
+fun AgendaSections.limitedTo(horizon: AgendaHorizon, sort: AgendaSort): AgendaSections {
+    val order = sort.comparator()
+    fun keep(items: List<AgendaItem>, included: Boolean) =
+        if (included) items.sortedWith(order) else emptyList()
+
+    return AgendaSections(
+        overdue = overdue.sortedWith(order),
+        today = today.sortedWith(order),
+        tomorrow = keep(tomorrow, horizon >= AgendaHorizon.TOMORROW),
+        thisWeek = keep(thisWeek, horizon >= AgendaHorizon.THIS_WEEK),
+        later = keep(later, horizon >= AgendaHorizon.EVERYTHING),
+    )
 }
 
 /**
@@ -88,28 +156,32 @@ data class WidgetAgenda(
 
 fun widgetAgenda(
     sections: AgendaSections,
-    horizon: WidgetHorizon,
-    limit: Int,
+    horizon: AgendaHorizon,
+    sort: AgendaSort = AgendaSort.DATE,
+    limit: Int = WIDGET_MAX_ITEMS,
 ): WidgetAgenda {
     // Overdue is in every horizon: something already late is the last thing
     // a widget should hide.
     val within = buildList {
         addAll(sections.overdue)
         addAll(sections.today)
-        if (horizon >= WidgetHorizon.TOMORROW) addAll(sections.tomorrow)
-        if (horizon >= WidgetHorizon.THIS_WEEK) addAll(sections.thisWeek)
-        if (horizon >= WidgetHorizon.EVERYTHING) addAll(sections.later)
+        if (horizon >= AgendaHorizon.TOMORROW) addAll(sections.tomorrow)
+        if (horizon >= AgendaHorizon.THIS_WEEK) addAll(sections.thisWeek)
+        if (horizon >= AgendaHorizon.EVERYTHING) addAll(sections.later)
     }
     if (within.isNotEmpty()) {
-        return WidgetAgenda(within.take(limit), showingUpcoming = false)
+        // Sorted across buckets rather than within them: the widget shows one
+        // flat list, so an order that only held inside each bucket would look
+        // arbitrary where the buckets meet.
+        return WidgetAgenda(within.sortedWith(sort.comparator()).take(limit), showingUpcoming = false)
     }
 
     val beyond = buildList {
-        if (horizon < WidgetHorizon.TOMORROW) addAll(sections.tomorrow)
-        if (horizon < WidgetHorizon.THIS_WEEK) addAll(sections.thisWeek)
-        if (horizon < WidgetHorizon.EVERYTHING) addAll(sections.later)
+        if (horizon < AgendaHorizon.TOMORROW) addAll(sections.tomorrow)
+        if (horizon < AgendaHorizon.THIS_WEEK) addAll(sections.thisWeek)
+        if (horizon < AgendaHorizon.EVERYTHING) addAll(sections.later)
     }
-    return WidgetAgenda(beyond.take(limit), showingUpcoming = true)
+    return WidgetAgenda(beyond.sortedWith(sort.comparator()).take(limit), showingUpcoming = true)
 }
 
 private fun bucketFor(date: LocalDate, today: LocalDate): AgendaBucket {

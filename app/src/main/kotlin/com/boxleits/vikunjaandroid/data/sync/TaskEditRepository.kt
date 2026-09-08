@@ -1,13 +1,18 @@
 package com.boxleits.vikunjaandroid.data.sync
 
 import com.boxleits.vikunjaandroid.core.repository.RemoteVikunjaRepository
+import com.boxleits.vikunjaandroid.core.repository.TaskWriteResult
 import com.boxleits.vikunjaandroid.core.repository.VikunjaSyncException
 import com.boxleits.vikunjaandroid.core.repository.isRetryable
 import com.boxleits.vikunjaandroid.data.local.AppDatabase
+import com.boxleits.vikunjaandroid.data.local.entity.ConflictNoticeEntity
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_SET_DONE
 import com.boxleits.vikunjaandroid.data.local.entity.PendingEditEntity
+import com.boxleits.vikunjaandroid.data.local.entity.toEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,7 +25,17 @@ sealed class EditResult {
 
     /** Rejected for good; the local row has been put back as it was. */
     data class Rejected(val message: String) : EditResult()
+
+    /**
+     * The task had already changed on the server, so the edit was dropped and
+     * the server's version kept. Reported separately because the user is told
+     * about it through the conflict notices, not through an error.
+     */
+    data object Conflicted : EditResult()
 }
+
+/** A local change that lost to a newer version on the server. */
+data class TaskConflict(val taskId: Long, val taskTitle: String)
 
 /**
  * Edits are written locally, queued, and then pushed.
@@ -40,6 +55,14 @@ class TaskEditRepository @Inject constructor(
     /** How many edits are waiting for the server. */
     fun observePendingCount(): Flow<Int> = database.pendingEditDao().observeCount()
 
+    /** Edits dropped because the server had a newer version, until acknowledged. */
+    fun observeConflicts(): Flow<List<TaskConflict>> = database.conflictNoticeDao().observeAll()
+        .map { notices -> notices.map { TaskConflict(it.taskId, it.taskTitle) } }
+
+    suspend fun acknowledgeConflicts() {
+        database.conflictNoticeDao().deleteAll()
+    }
+
     suspend fun setDone(taskId: Long, done: Boolean): EditResult {
         val taskDao = database.taskDao()
         val pendingDao = database.pendingEditDao()
@@ -53,6 +76,10 @@ class TaskEditRepository @Inject constructor(
         val queued = pendingDao.find(taskId, EDIT_TYPE_SET_DONE)
         val previousDone = queued?.previousDone ?: before.done
         val previousDoneAt = queued?.previousDoneAtEpochMs ?: before.doneAtEpochMs
+        // Same reasoning as the previous value: the base version is the one
+        // this run of edits started from. Taking `before` here instead would
+        // adopt a version the user never actually saw a conflict against.
+        val baseUpdatedAt = if (queued != null) queued.baseUpdatedAtEpochMs else before.updatedAtEpochMs
 
         val now = Clock.System.now()
         taskDao.updateDone(
@@ -67,6 +94,7 @@ class TaskEditRepository @Inject constructor(
                 done = done,
                 previousDone = previousDone,
                 previousDoneAtEpochMs = previousDoneAt,
+                baseUpdatedAtEpochMs = baseUpdatedAt,
                 createdAtEpochMs = now.toEpochMilliseconds(),
             ),
         )
@@ -90,13 +118,14 @@ class TaskEditRepository @Inject constructor(
         val pendingDao = database.pendingEditDao()
         val taskDao = database.taskDao()
         val queued = pendingDao.getAll()
-        if (queued.isEmpty()) return FlushOutcome(pushed = 0, stillQueued = 0, rejected = 0)
+        if (queued.isEmpty()) return FlushOutcome(pushed = 0, stillQueued = 0, rejected = 0, conflicted = 0)
 
         val api = apiProvider.getApi()
             ?: return FlushOutcome(
                 pushed = 0,
                 stillQueued = queued.size,
                 rejected = 0,
+                conflicted = 0,
                 message = "Not connected to a Vikunja instance.",
             )
         val remote = RemoteVikunjaRepository(api)
@@ -104,18 +133,48 @@ class TaskEditRepository @Inject constructor(
         var pushed = 0
         var stillQueued = 0
         var rejected = 0
+        var conflicted = 0
         var message: String? = null
 
         for (edit in queued) {
             try {
-                val saved = remote.setTaskDone(edit.taskId, edit.done)
-                taskDao.updateDone(
-                    id = saved.id,
-                    done = saved.done,
-                    doneAtEpochMs = saved.doneAt?.toEpochMilliseconds(),
+                val outcome = remote.setTaskDone(
+                    taskId = edit.taskId,
+                    done = edit.done,
+                    expectedUpdatedAt = edit.baseUpdatedAtEpochMs?.let { Instant.fromEpochMilliseconds(it) },
                 )
-                pendingDao.deleteById(edit.id)
-                pushed++
+                when (outcome) {
+                    is TaskWriteResult.Applied -> {
+                        val saved = outcome.task
+                        taskDao.updateDoneAndVersion(
+                            id = saved.id,
+                            done = saved.done,
+                            doneAtEpochMs = saved.doneAt?.toEpochMilliseconds(),
+                            updatedAtEpochMs = saved.updatedAt?.toEpochMilliseconds(),
+                        )
+                        pendingDao.deleteById(edit.id)
+                        pushed++
+                    }
+
+                    is TaskWriteResult.Conflict -> {
+                        // The server's version wins whole, rather than the local
+                        // edit being merged into it: with one boolean at stake
+                        // there is nothing to merge, and quietly keeping the
+                        // local value would be the silent overwrite this whole
+                        // check exists to prevent.
+                        val server = outcome.serverTask
+                        taskDao.upsert(server.toEntity())
+                        database.conflictNoticeDao().upsert(
+                            ConflictNoticeEntity(
+                                taskId = server.id,
+                                taskTitle = server.title,
+                                detectedAtEpochMs = Clock.System.now().toEpochMilliseconds(),
+                            ),
+                        )
+                        pendingDao.deleteById(edit.id)
+                        conflicted++
+                    }
+                }
             } catch (e: VikunjaSyncException) {
                 message = message ?: e.message
                 if (e.isRetryable()) {
@@ -141,7 +200,7 @@ class TaskEditRepository @Inject constructor(
         // and asking for a sync from here would mean a failing flush kept
         // re-triggering the sync that triggered it. Retries are arranged by
         // the caller that started the edit, plus the periodic sync.
-        return FlushOutcome(pushed, stillQueued, rejected, message)
+        return FlushOutcome(pushed, stillQueued, rejected, conflicted, message)
     }
 }
 
@@ -149,10 +208,12 @@ data class FlushOutcome(
     val pushed: Int,
     val stillQueued: Int,
     val rejected: Int,
+    val conflicted: Int = 0,
     val message: String? = null,
 ) {
     fun resultForCaller(): EditResult = when {
         rejected > 0 -> EditResult.Rejected(message ?: "Vikunja rejected the change.")
+        conflicted > 0 -> EditResult.Conflicted
         stillQueued > 0 -> EditResult.Queued(message ?: "No connection.")
         else -> EditResult.Synced
     }

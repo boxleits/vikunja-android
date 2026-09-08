@@ -166,10 +166,84 @@ class RemoteVikunjaRepositoryTest {
             ),
         )
 
-        val task = repository.setTaskDone(taskId = 7, done = true)
+        val result = repository.setTaskDone(taskId = 7, done = true)
 
+        assertThat(result).isInstanceOf(TaskWriteResult.Applied::class.java)
+        val task = (result as TaskWriteResult.Applied).task
         assertThat(task.done).isTrue()
         assertThat(task.doneAt).isEqualTo(Instant.parse("2024-01-15T10:30:00Z"))
+    }
+
+    @Test
+    fun `setTaskDone applies the write when the task has not changed since the edit`() = runTest {
+        val base = Instant.parse("2024-01-15T10:00:00Z")
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"T","done":false,"updated":"2024-01-15T10:00:00Z"}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"T","done":true,"updated":"2024-01-15T11:00:00Z"}""",
+            ),
+        )
+
+        val result = repository.setTaskDone(taskId = 7, done = true, expectedUpdatedAt = base)
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Applied::class.java)
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `setTaskDone reports a conflict and writes nothing when the task moved on`() = runTest {
+        val base = Instant.parse("2024-01-15T10:00:00Z")
+        // Someone else saved the task after this edit was made.
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"Renamed elsewhere","done":true,"updated":"2024-01-15T12:00:00Z"}""",
+            ),
+        )
+
+        val result = repository.setTaskDone(taskId = 7, done = false, expectedUpdatedAt = base)
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Conflict::class.java)
+        val serverTask = (result as TaskWriteResult.Conflict).serverTask
+        assertThat(serverTask.title).isEqualTo("Renamed elsewhere")
+        assertThat(serverTask.done).isTrue()
+        // The whole point: the POST is never sent, so the newer version stands.
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `setTaskDone skips the conflict check when no base version is known`() = runTest {
+        // Edits queued before the base version was recorded must still flush
+        // rather than being stuck as permanent conflicts.
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"T","done":false,"updated":"2024-01-15T12:00:00Z"}""",
+            ),
+        )
+        server.enqueue(MockResponse().setBody("""{"id":7,"project_id":1,"title":"T","done":true}"""))
+
+        val result = repository.setTaskDone(taskId = 7, done = true, expectedUpdatedAt = null)
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Applied::class.java)
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `setTaskDone treats a task with no server timestamp as a conflict against a known base`() = runTest {
+        // A server that stops sending `updated` must not be read as "unchanged".
+        server.enqueue(MockResponse().setBody("""{"id":7,"project_id":1,"title":"T","done":false}"""))
+
+        val result = repository.setTaskDone(
+            taskId = 7,
+            done = true,
+            expectedUpdatedAt = Instant.parse("2024-01-15T10:00:00Z"),
+        )
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Conflict::class.java)
+        assertThat(server.requestCount).isEqualTo(1)
     }
 
     @Test

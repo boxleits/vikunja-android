@@ -47,4 +47,5 @@ fun TaskDto.toDomain(): Task = Task(
     endDate = parseVikunjaInstant(endDate),
     labels = labels.orEmpty().map { it.toDomain() },
     position = position,
+    updatedAt = parseVikunjaInstant(updated),
 )

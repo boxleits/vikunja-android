@@ -22,11 +22,34 @@ data class SyncSnapshot(
     val syncedAt: Instant,
 )
 
+/** Outcome of a write that is conditional on the task not having moved on. */
+sealed class TaskWriteResult {
+    /** The write went through; [task] is the task as the server left it. */
+    data class Applied(val task: Task) : TaskWriteResult()
+
+    /**
+     * Somebody changed the task after this edit was made, so nothing was
+     * written. [serverTask] is the version that won.
+     */
+    data class Conflict(val serverTask: Task) : TaskWriteResult()
+}
+
 interface VikunjaRepository {
     suspend fun fetchSnapshot(): SyncSnapshot
 
-    /** Marks a task done/not-done, returning the task as the server left it. */
-    suspend fun setTaskDone(taskId: Long, done: Boolean): Task
+    /**
+     * Marks a task done/not-done, unless it changed on the server first.
+     *
+     * [expectedUpdatedAt] is the task's `updated` stamp as of when the edit was
+     * made. If the server's differs, the edit is abandoned rather than written
+     * over the newer version. Passing null skips the check — used for edits
+     * queued before a base version was recorded.
+     */
+    suspend fun setTaskDone(
+        taskId: Long,
+        done: Boolean,
+        expectedUpdatedAt: Instant? = null,
+    ): TaskWriteResult
 }
 
 private const val FIELD_DONE = "done"
@@ -53,11 +76,26 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
      * empty. Round-tripping the server's own object keeps every field this
      * client doesn't model intact.
      */
-    override suspend fun setTaskDone(taskId: Long, done: Boolean): Task = wrapErrors {
+    override suspend fun setTaskDone(
+        taskId: Long,
+        done: Boolean,
+        expectedUpdatedAt: Instant?,
+    ): TaskWriteResult = wrapErrors {
         val current = requireBody(api.getTaskJson(taskId))
+        val currentTask = json.decodeFromJsonElement(TaskDto.serializer(), current).toDomain()
+
+        // The read this write is built on doubles as the conflict check, so
+        // detecting one costs no extra request — and crucially the POST is
+        // never sent, rather than sent and regretted.
+        if (expectedUpdatedAt != null && currentTask.updatedAt != expectedUpdatedAt) {
+            // Any difference counts, not only a newer stamp: either way this is
+            // no longer the task the edit was made against.
+            return@wrapErrors TaskWriteResult.Conflict(currentTask)
+        }
+
         val updated = JsonObject(current + (FIELD_DONE to JsonPrimitive(done)))
         val saved = requireBody(api.updateTaskJson(taskId, updated))
-        json.decodeFromJsonElement(TaskDto.serializer(), saved).toDomain()
+        TaskWriteResult.Applied(json.decodeFromJsonElement(TaskDto.serializer(), saved).toDomain())
     }
 
     private fun requireBody(response: Response<JsonObject>): JsonObject {

@@ -21,6 +21,8 @@ data class TaskEntity(
     val startDateEpochMs: Long?,
     val endDateEpochMs: Long?,
     val position: Double,
+    /** The server's `updated` stamp, used to detect a task that moved on. */
+    val updatedAtEpochMs: Long?,
 )
 
 fun Task.toEntity(): TaskEntity = TaskEntity(
@@ -36,6 +38,7 @@ fun Task.toEntity(): TaskEntity = TaskEntity(
     startDateEpochMs = startDate?.toEpochMilliseconds(),
     endDateEpochMs = endDate?.toEpochMilliseconds(),
     position = position,
+    updatedAtEpochMs = updatedAt?.toEpochMilliseconds(),
 )
 
 fun TaskEntity.toDomain(labels: List<Label>): Task = Task(
@@ -52,4 +55,5 @@ fun TaskEntity.toDomain(labels: List<Label>): Task = Task(
     endDate = endDateEpochMs?.let { Instant.fromEpochMilliseconds(it) },
     labels = labels,
     position = position,
+    updatedAt = updatedAtEpochMs?.let { Instant.fromEpochMilliseconds(it) },
 )

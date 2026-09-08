@@ -3,6 +3,8 @@ package com.boxleits.vikunjaandroid.ui.agenda
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.boxleits.vikunjaandroid.core.agenda.AgendaSections
+import com.boxleits.vikunjaandroid.core.agenda.limitedTo
+import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
 import com.boxleits.vikunjaandroid.data.sync.SyncRepository
 import com.boxleits.vikunjaandroid.data.sync.SyncResult
 import com.boxleits.vikunjaandroid.data.sync.TaskQueryRepository
@@ -11,20 +13,28 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private val EMPTY_AGENDA = AgendaSections(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
-
 @HiltViewModel
 class AgendaViewModel @Inject constructor(
     taskQueryRepository: TaskQueryRepository,
+    settingsRepository: SettingsRepository,
     private val syncRepository: SyncRepository,
 ) : ViewModel() {
 
-    val agenda: StateFlow<AgendaSections> = taskQueryRepository.observeAgenda()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), EMPTY_AGENDA)
+    /**
+     * The agenda as configured in Settings — the same range and order the
+     * widget uses, so the two can't disagree about what "my agenda" means.
+     */
+    val agenda: StateFlow<AgendaSections> = combine(
+        taskQueryRepository.observeAgenda(),
+        settingsRepository.agendaSettingsFlow,
+    ) { sections, settings ->
+        sections.limitedTo(settings.horizon, settings.sort)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AgendaSections.EMPTY)
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()

@@ -57,17 +57,23 @@ jobs:
       - name: Accept Android SDK licences
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
-      - name: Assemble debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+      - name: Assemble debug and release APKs
+        # The release build is minified and signed with the same debug key, so
+        # it installs over the debug one. It exists to make performance
+        # measurable — Compose in a debug build is slow enough that judging
+        # scroll behaviour there measures the build type, not the code.
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --stacktrace
 
       # Kept for per-run traceability. Artifacts are always served as a zip,
       # so the rolling release below is the one to download by hand.
-      - name: Upload APK artifact
+      - name: Upload APK artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: app-apks
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       # Release assets download as the raw file, unlike artifacts. The tag is
@@ -88,9 +94,17 @@ jobs:
           gh release delete debug-latest --yes --cleanup-tag || true
           gh release create debug-latest \
             app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/release/app-release.apk \
             --target "$RELEASE_SHA" \
             --prerelease \
             --title "Debug build (latest)" \
-            --notes "Automatic debug build of \`$RELEASE_SHA\` from \`$RELEASE_REF\`.
+            --notes "Automatic build of \`$RELEASE_SHA\` from \`$RELEASE_REF\`.
 
-          Debug-signed with the repo's checked-in key, so builds install over each other."
+          Two APKs, both signed with the repo's checked-in debug key, so they
+          install over each other and over previous builds without losing data:
+
+          - **app-debug.apk** — unminified, for everyday testing.
+          - **app-release.apk** — minified by R8. Use this one to judge
+            performance; Compose in a debug build is slow enough that scrolling
+            there measures the build type rather than the code. Not a
+            distributable release: a real one needs a key kept out of the repo."

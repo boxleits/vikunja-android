@@ -32,7 +32,7 @@ heading hierarchy or multi-state workflow. The mapping this app uses:
 | `SCHEDULED`/`DEADLINE` | `start_date`/`due_date` | Agenda view, due date wins if both are set |
 | `:tag:` | Label | Label chip |
 | Agenda view | — | Computed client-side across all projects |
-| Agenda in the home screen widget | — | Same data, with a configurable horizon (Settings → Widget) |
+| Agenda in the home screen widget | — | Same data and same settings as the Agenda screen, scrollable |
 
 Since Vikunja has no subtask hierarchy of its own, the outline tree is
 reconstructed from task relations rather than stored that way on the
@@ -98,8 +98,62 @@ connectivity-constrained one-shot sync, and the periodic sync flushes the
 queue too. `flushPending()` deliberately schedules nothing itself, so a
 failing flush can't re-trigger the sync that called it.
 
-Not handled yet: a genuine conflict. If a task changed on the server *and*
-locally, the queued edit is pushed on top without noticing.
+### What triggers a sync
+
+| Trigger | When |
+|---|---|
+| Onboarding | Right after connecting |
+| Pull to refresh, *Sync now* | On demand |
+| Foreground | Opening the app, if the cache is more than 30 seconds old |
+| Periodic | Every 30 minutes, with a connection |
+| Queued edit | As soon as there's a connection, to flush the backlog |
+
+The foreground sync runs directly rather than through WorkManager. The
+scheduler's immediate-sync work is unique with KEEP, so a run left in backoff
+after a failure would silently swallow later requests — precisely when the user
+is looking at the screen.
+
+There is deliberately no push channel. Instant sync would mean either Google's
+push service, or a separate distributor app on the phone to hold the
+connection — Android gives a normal app no cheap way to keep one open. Since
+opening the app already refreshes it, the remaining window that push would
+cover is small: the app sitting open in front of you while something changes
+elsewhere.
+
+### Conflicts
+
+**The server wins, and the user is told.**
+
+Vikunja has nothing to build on server-side: tasks carry no version or ETag,
+and the update endpoint has no `If-Match`, so it will always accept a stale
+write. Detection therefore happens client-side, using the task's `updated`
+timestamp as its version.
+
+A queued edit records the `updated` stamp the task had when the edit was made.
+The write is already a read-modify-write — fetch the task, flip one field, post
+it back — so the fetch doubles as the check, and detecting a conflict costs no
+extra request:
+
+| At flush time | Result |
+|---|---|
+| Server's `updated` matches the recorded one | The write goes ahead |
+| It differs | **No POST is sent.** The edit is dropped, the server's version replaces the local row, and a notice is stored |
+| No recorded base (edit queued by an older build) | Check skipped — can't tell, so don't guess |
+
+The local edit is discarded rather than merged. With a single boolean at stake
+there is nothing to merge, and keeping the local value quietly is exactly the
+silent overwrite the check exists to prevent.
+
+Notices are stored in the database, not raised in the moment: the flush that
+finds a conflict usually runs in a background worker with no UI attached, so
+the news has to wait until the app is next opened. It then appears as a dialog
+naming the affected tasks — a dialog rather than a snackbar, because a change
+of the user's was thrown away and a message that vanishes on its own is the
+wrong way to say so.
+
+Repeated toggles of one task collapse into a single queued edit, and the
+recorded base version stays the one from before the *first* edit — the version
+the user was actually looking at.
 
 ## Authentication
 
@@ -140,18 +194,30 @@ Run just the pure-Kotlin module (no Android SDK required):
 `.github/workflows/build.yml` runs on every push to `master` and on every PR:
 one job runs `:core:test`, another assembles the debug APK. Both pin JDK 17.
 
-The APK is published two ways. The **`debug-latest` pre-release** always
-carries the newest build, at a stable direct-download URL:
+The **`debug-latest` pre-release** always carries the newest build, at stable
+direct-download URLs — two of them:
 
-<https://github.com/boxleits/vikunja-android/releases/download/debug-latest/app-debug.apk>
+| | |
+|---|---|
+| [`app-debug.apk`](https://github.com/boxleits/vikunja-android/releases/download/debug-latest/app-debug.apk) | Unminified. Everyday testing. |
+| [`app-release.apk`](https://github.com/boxleits/vikunja-android/releases/download/debug-latest/app-release.apk) | Minified by R8. **Use this to judge performance.** |
 
-It's also attached to each run as a build artifact, which keeps per-run
-history but downloads as a zip — the release asset is the one to grab by
-hand.
+The distinction matters more than it looks. Compose in a debug build is
+materially slower than in a minified one, so scroll smoothness measured on a
+debug APK largely reports the build type rather than the code — Google's own
+guidance is to profile release builds only. Both are attached to each run as
+build artifacts too, which keeps per-run history but downloads as a zip.
 
-Debug builds are signed with the checked-in `app/debug.keystore`, so
-successive builds install over one another instead of forcing an
-uninstall. That key is not a secret and must never sign a release build.
+Both are signed with the checked-in `app/debug.keystore`, so they install over
+one another and over previous builds without losing local data. That key is not
+a secret; a genuinely distributable release needs a real key kept out of the
+repository, so `app-release.apk` here is a measurement tool, not a shippable
+artifact.
+
+R8 can break what a compiler cannot see. `app/proguard-rules.pro` keeps the
+serializable DTOs, the Retrofit interface and the widget classes for that
+reason; if the minified build misbehaves where the debug one doesn't, that file
+is the first place to look.
 
 ### Dev container
 
@@ -172,7 +238,7 @@ the Gradle Plugin Portal were reachable.
 Practical effect:
 - **`:core`** is pure Kotlin/JVM (Retrofit, OkHttp, kotlinx.serialization/
   coroutines/datetime — all Maven Central). It was fully compiled and its
-  **20 unit tests were run and pass** in that environment
+  **54 unit tests were run and pass** in that environment
   (`./gradlew :core:test`).
 
   Reaching that point needed AGP kept out of the root `plugins {}` block,
@@ -198,15 +264,49 @@ Practical effect:
   performs targets the blocked host). The first `Reopen in Container` is
   its first real run.
 
+## The agenda
+
+One setting governs both the Agenda screen and the home screen widget
+(Settings → Agenda), so the two cannot disagree about what "my agenda" is:
+
+- **Range** — today, today and tomorrow, within a week, any time. Overdue is
+  always included, and if nothing falls inside the range the widget shows what
+  is next rather than sitting empty.
+- **Order** — date, priority, or title. Applied across the whole list rather
+  than within each bucket, since the widget shows one flat list.
+
+Every row carries a second line with the due (or scheduled) date *and time*,
+formatted in the device's locale. Overdue items say so and are drawn in the
+error colour — they are in every range, so without a marker they were
+indistinguishable from anything else due soon.
+
+Bucketing is by date, not by the minute: a task due today at 09:00 still counts
+as due today at 14:00, matching how an org-mode agenda reads. The time on each
+row is what makes the difference visible.
+
+The widget collects its data inside the Glance composition rather than reading
+it once beforehand. `provideContent` starts a session that outlives a single
+draw, and a later `update()` recomposes *that* session — so anything captured
+before it is frozen for the session's lifetime. Reading it up front is why the
+widget used to ignore a settings change.
+
+Orgzly does this differently and better in one respect: its widget is
+configured *per placed instance*, and what it shows is a saved search, with the
+ordering carried in the query itself (`o.priority`, `o.deadline`). That is the
+right model once there is something like a saved search to point at; until
+then, an explicit order setting is the honest substitute. There is no item
+limit in either — the list scrolls.
+
 ## Roadmap
 
 Roughly in order:
 
 1. More editing: change priority, labels and dates from the outline
    (toggling done is in, and rides the same queue).
-2. Conflict handling. The queue protects local edits from being overwritten
-   by a sync, but the server still wins on a genuine conflict — if a task
-   changed on both sides, the queued edit is pushed on top without noticing.
+2. Conflict handling for richer edits. Detection is in (see
+   [Conflicts](#conflicts)); once text fields are editable, "server wins" stops
+   being good enough and the losing version needs to be kept and shown rather
+   than dropped.
 3. Quick-capture (an "Inbox" project, fast add from outside the app).
 4. Swipe gestures for state/priority changes, notifications for due tasks.
 5. Encrypted token storage.

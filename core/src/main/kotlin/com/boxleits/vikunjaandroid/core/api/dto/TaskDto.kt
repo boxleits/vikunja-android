@@ -18,6 +18,11 @@ data class TaskDto(
     val labels: List<LabelDto>? = null,
     @SerialName("related_tasks") val relatedTasks: Map<String, List<RelatedTaskRefDto>>? = null,
     val position: Double = 0.0,
+    /**
+     * Server-set, read-only in Vikunja. Used as the version to detect a task
+     * that changed underneath a queued edit.
+     */
+    val updated: String? = null,
 )
 
 @Serializable
