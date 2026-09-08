@@ -3,8 +3,10 @@ package com.boxleits.vikunjaandroid.core.repository
 import com.boxleits.vikunjaandroid.core.api.VikunjaApi
 import com.boxleits.vikunjaandroid.core.api.dto.RELATION_KIND_PARENT_TASK
 import com.boxleits.vikunjaandroid.core.api.dto.TaskDto
+import com.boxleits.vikunjaandroid.core.mapper.formatVikunjaInstant
 import com.boxleits.vikunjaandroid.core.mapper.toDomain
 import com.boxleits.vikunjaandroid.core.model.Label
+import com.boxleits.vikunjaandroid.core.model.Priority
 import com.boxleits.vikunjaandroid.core.model.Project
 import com.boxleits.vikunjaandroid.core.model.Task
 import kotlinx.datetime.Clock
@@ -35,6 +37,21 @@ sealed class TaskWriteResult {
     data class Conflict(val serverTask: Task) : TaskWriteResult()
 }
 
+/**
+ * The parts of a task the edit form covers, as the user left them.
+ *
+ * Every field is stated rather than only the changed ones. That reads like it
+ * would clobber concurrent changes, but it can't: the write is conditional on
+ * the task not having moved on, and the fields this doesn't name are carried
+ * over from the server's own copy of the task rather than dropped.
+ */
+data class TaskEdits(
+    val title: String,
+    val priority: Priority,
+    /** Null clears the due date. */
+    val dueDate: Instant?,
+)
+
 interface VikunjaRepository {
     suspend fun fetchSnapshot(): SyncSnapshot
 
@@ -59,10 +76,23 @@ interface VikunjaRepository {
      * real id comes from — a locally created task has none until this returns.
      */
     suspend fun createTask(projectId: Long, title: String, parentTaskId: Long? = null): Task
+
+    /**
+     * Applies [edits] to a task, unless it changed on the server first.
+     *
+     * [expectedUpdatedAt] works exactly as it does for [setTaskDone].
+     */
+    suspend fun updateTask(
+        taskId: Long,
+        edits: TaskEdits,
+        expectedUpdatedAt: Instant? = null,
+    ): TaskWriteResult
 }
 
 private const val FIELD_DONE = "done"
 private const val FIELD_TITLE = "title"
+private const val FIELD_PRIORITY = "priority"
+private const val FIELD_DUE_DATE = "due_date"
 private const val FIELD_OTHER_TASK_ID = "other_task_id"
 private const val FIELD_RELATION_KIND = "relation_kind"
 
@@ -78,20 +108,45 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
         SyncSnapshot(projects = projects, tasks = tasks, labels = labels, syncedAt = Clock.System.now())
     }
 
-    /**
-     * Read-modify-write: fetches the task's own JSON, flips `done` in it, and
-     * posts the whole object back.
-     *
-     * Sending a bare `{"done": …}` would be one request instead of two, but
-     * Vikunja's update writes an explicit column list — title and description
-     * among them — so a field missing from the payload risks being written as
-     * empty. Round-tripping the server's own object keeps every field this
-     * client doesn't model intact.
-     */
     override suspend fun setTaskDone(
         taskId: Long,
         done: Boolean,
         expectedUpdatedAt: Instant?,
+    ): TaskWriteResult = conditionalWrite(taskId, expectedUpdatedAt) { current ->
+        JsonObject(current + (FIELD_DONE to JsonPrimitive(done)))
+    }
+
+    override suspend fun updateTask(
+        taskId: Long,
+        edits: TaskEdits,
+        expectedUpdatedAt: Instant?,
+    ): TaskWriteResult = conditionalWrite(taskId, expectedUpdatedAt) { current ->
+        JsonObject(
+            current + mapOf(
+                FIELD_TITLE to JsonPrimitive(edits.title),
+                FIELD_PRIORITY to JsonPrimitive(edits.priority.value),
+                // Always written, even when unset: leaving the field out would
+                // keep the old date, so clearing one has to be said out loud.
+                FIELD_DUE_DATE to JsonPrimitive(formatVikunjaInstant(edits.dueDate)),
+            ),
+        )
+    }
+
+    /**
+     * Read-modify-write: fetches the task's own JSON, lets [mutate] change the
+     * fields it cares about, and posts the whole object back.
+     *
+     * Sending only the changed fields would be one request instead of two, but
+     * Vikunja's update writes an explicit column list — title and description
+     * among them — so a field missing from the payload risks being written as
+     * empty. Round-tripping the server's own object keeps every field this
+     * client doesn't model intact, and is why an edit form that states all of
+     * its fields still can't clobber the ones it doesn't show.
+     */
+    private suspend fun conditionalWrite(
+        taskId: Long,
+        expectedUpdatedAt: Instant?,
+        mutate: (JsonObject) -> JsonObject,
     ): TaskWriteResult = wrapErrors {
         val current = requireBody(api.getTaskJson(taskId))
         val currentTask = json.decodeFromJsonElement(TaskDto.serializer(), current).toDomain()
@@ -105,8 +160,7 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
             return@wrapErrors TaskWriteResult.Conflict(currentTask)
         }
 
-        val updated = JsonObject(current + (FIELD_DONE to JsonPrimitive(done)))
-        val saved = requireBody(api.updateTaskJson(taskId, updated))
+        val saved = requireBody(api.updateTaskJson(taskId, mutate(current)))
         TaskWriteResult.Applied(json.decodeFromJsonElement(TaskDto.serializer(), saved).toDomain())
     }
 

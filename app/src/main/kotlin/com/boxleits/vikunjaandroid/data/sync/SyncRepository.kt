@@ -5,6 +5,7 @@ import com.boxleits.vikunjaandroid.core.repository.RemoteVikunjaRepository
 import com.boxleits.vikunjaandroid.core.repository.VikunjaSyncException
 import com.boxleits.vikunjaandroid.data.local.AppDatabase
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_CREATE_TASK
+import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_UPDATE_TASK
 import com.boxleits.vikunjaandroid.data.local.entity.TaskLabelCrossRef
 import com.boxleits.vikunjaandroid.data.local.entity.toPlaceholderTask
 import com.boxleits.vikunjaandroid.data.local.entity.toEntity
@@ -50,6 +51,13 @@ class SyncRepository @Inject constructor(
                         // A task the server has never seen is not in the
                         // snapshot, so the replace above just deleted it.
                         EDIT_TYPE_CREATE_TASK -> database.taskDao().upsert(edit.toPlaceholderTask())
+
+                        EDIT_TYPE_UPDATE_TASK -> database.taskDao().updateFields(
+                            id = edit.taskId,
+                            title = edit.title.orEmpty(),
+                            priority = edit.priority ?: 0,
+                            dueDateEpochMs = edit.dueDateEpochMs,
+                        )
 
                         else -> database.taskDao().updateDone(
                             id = edit.taskId,

@@ -1,5 +1,6 @@
 package com.boxleits.vikunjaandroid.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -36,6 +37,7 @@ fun OutlineTaskRow(
     isCollapsed: Boolean,
     onToggleCollapse: () -> Unit,
     onSetDone: (Boolean) -> Unit,
+    onEdit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val task = node.task
@@ -71,7 +73,15 @@ fun OutlineTaskRow(
 
         Checkbox(checked = task.done, onCheckedChange = onSetDone)
 
-        Column(modifier = Modifier.weight(1f)) {
+        // Tapping the heading opens it for editing, the way tapping a note
+        // does in Orgzly. The checkbox and the chevron keep their own targets,
+        // so ticking a task off is still one tap and never opens anything.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onEdit)
+                .padding(vertical = 8.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (task.priority.orgMarker.isNotEmpty()) {
                     Text(

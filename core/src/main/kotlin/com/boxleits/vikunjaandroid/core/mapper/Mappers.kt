@@ -13,6 +13,15 @@ import kotlinx.datetime.Instant
 /** Vikunja represents "no date set" with this zero-value timestamp rather than `null`. */
 private const val VIKUNJA_ZERO_DATE_PREFIX = "0001-01-01"
 
+/**
+ * What to send to clear a date.
+ *
+ * Omitting the field would leave the old value standing, and Vikunja rejects
+ * `null` for it, so "no date" has to be written as the zero date it reads back
+ * as unset. [parseVikunjaInstant] is the other half of this round trip.
+ */
+private const val VIKUNJA_ZERO_DATE = "0001-01-01T00:00:00Z"
+
 /** Parses a Vikunja RFC3339 timestamp, treating blank/zero-date/unparsable values as "unset". */
 fun parseVikunjaInstant(raw: String?): Instant? {
     if (raw.isNullOrBlank() || raw.startsWith(VIKUNJA_ZERO_DATE_PREFIX)) return null
@@ -22,6 +31,9 @@ fun parseVikunjaInstant(raw: String?): Instant? {
         null
     }
 }
+
+/** Renders an instant for Vikunja's API, writing "no date" as the zero date it expects. */
+fun formatVikunjaInstant(instant: Instant?): String = instant?.toString() ?: VIKUNJA_ZERO_DATE
 
 fun LabelDto.toDomain(): Label = Label(id = id, title = title, hexColor = hexColor)
 

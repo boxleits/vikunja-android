@@ -16,15 +16,27 @@ const val EDIT_TYPE_SET_DONE = "SET_DONE"
 const val EDIT_TYPE_CREATE_TASK = "CREATE_TASK"
 
 /**
+ * A change to a task's title, priority or due date.
+ *
+ * Kept apart from SET_DONE rather than folded into one "edit" row, because
+ * ticking a task off and rewriting it are different gestures with different
+ * undo: a rejected tick should put the checkbox back without also reverting a
+ * title the user retyped in between.
+ */
+const val EDIT_TYPE_UPDATE_TASK = "UPDATE_TASK"
+
+/**
  * An edit made locally that the server hasn't accepted yet.
  *
- * [previousDone]/[previousDoneAtEpochMs] are the values the row held before
- * the edit, so a write the server permanently rejects can be undone exactly
- * rather than guessed at.
+ * The `previous*` columns are the values the row held before the edit, so a
+ * write the server permanently rejects can be undone exactly rather than
+ * guessed at.
  *
- * The unique index on (taskId, type) makes a repeated toggle of the same task
- * collapse into one queued edit — what matters is the state the user last
- * asked for, not how many times they tapped.
+ * The unique index on (taskId, type) makes a repeated edit of the same kind to
+ * the same task collapse into one queued edit — what matters is the state the
+ * user last asked for, not how many times they tapped. Two edits of *different*
+ * kinds to one task do coexist, which is why the flush has to keep their base
+ * versions in step as it goes.
  */
 @Entity(
     tableName = "pending_edits",
@@ -34,13 +46,20 @@ data class PendingEditEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val taskId: Long,
     val type: String,
-    /** SET_DONE only; meaningless for a create, which has nothing to toggle. */
+    /** SET_DONE only; meaningless for a create or a field edit. */
     val done: Boolean,
     val previousDone: Boolean,
     val previousDoneAtEpochMs: Long?,
-    /** CREATE_TASK only: what to create, and where. */
+    /** CREATE_TASK: the title to create with. UPDATE_TASK: the new title. */
     val title: String? = null,
+    /** CREATE_TASK only: where to create it. */
     val projectId: Long? = null,
+    /** UPDATE_TASK only: the new values, and what to put back if the write is refused. */
+    val priority: Int? = null,
+    val dueDateEpochMs: Long? = null,
+    val previousTitle: String? = null,
+    val previousPriority: Int? = null,
+    val previousDueDateEpochMs: Long? = null,
     /**
      * The task's server `updated` stamp when the edit was made. If the server's
      * differs at flush time, somebody else got there first. Null for an edit

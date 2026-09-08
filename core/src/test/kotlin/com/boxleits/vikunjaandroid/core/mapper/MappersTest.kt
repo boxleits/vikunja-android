@@ -55,6 +55,17 @@ class MappersTest {
     }
 
     @Test
+    fun `formatVikunjaInstant round-trips through parseVikunjaInstant, unset included`() {
+        val at = Instant.parse("2024-01-15T10:30:00Z")
+
+        assertThat(parseVikunjaInstant(formatVikunjaInstant(at))).isEqualTo(at)
+        // The pair that matters for clearing a date: what this writes for
+        // "none" has to be what the parser reads back as none.
+        assertThat(formatVikunjaInstant(null)).isEqualTo("0001-01-01T00:00:00Z")
+        assertThat(parseVikunjaInstant(formatVikunjaInstant(null))).isNull()
+    }
+
+    @Test
     fun `LabelDto and ProjectDto map straightforwardly`() {
         val label = LabelDto(id = 1, title = "urgent", hexColor = "ff0000").toDomain()
 

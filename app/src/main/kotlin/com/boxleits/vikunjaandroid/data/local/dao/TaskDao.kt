@@ -41,6 +41,19 @@ interface TaskDao {
     suspend fun updateDone(id: Long, done: Boolean, doneAtEpochMs: Long?)
 
     /**
+     * Applies a field edit locally, before the server has seen it.
+     *
+     * Deliberately narrow: an edit changes these three columns and nothing
+     * else, so it can't disturb `done` or the labels a concurrent tick or sync
+     * is looking after.
+     */
+    @Query(
+        "UPDATE tasks SET title = :title, priority = :priority, " +
+            "dueDateEpochMs = :dueDateEpochMs WHERE id = :id",
+    )
+    suspend fun updateFields(id: Long, title: String, priority: Int, dueDateEpochMs: Long?)
+
+    /**
      * Writes back what the server returned, version included, so the next edit
      * to this task is compared against the right base.
      */
@@ -49,6 +62,26 @@ interface TaskDao {
             "updatedAtEpochMs = :updatedAtEpochMs WHERE id = :id",
     )
     suspend fun updateDoneAndVersion(id: Long, done: Boolean, doneAtEpochMs: Long?, updatedAtEpochMs: Long?)
+
+    /**
+     * Writes back the fields a server-accepted edit produced, version included.
+     *
+     * Narrow for the same reason as [updateFields], and for one more: a tick
+     * queued behind this edit has already shown itself on the row, so writing
+     * the server's `done` back here would flip the checkbox under the user
+     * until that tick got its turn.
+     */
+    @Query(
+        "UPDATE tasks SET title = :title, priority = :priority, dueDateEpochMs = :dueDateEpochMs, " +
+            "updatedAtEpochMs = :updatedAtEpochMs WHERE id = :id",
+    )
+    suspend fun updateFieldsAndVersion(
+        id: Long,
+        title: String,
+        priority: Int,
+        dueDateEpochMs: Long?,
+        updatedAtEpochMs: Long?,
+    )
 
     /**
      * Replaces one task with the server's version — used when a conflict means

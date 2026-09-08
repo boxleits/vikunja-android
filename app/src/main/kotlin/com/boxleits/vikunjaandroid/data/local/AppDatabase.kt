@@ -25,7 +25,7 @@ import com.boxleits.vikunjaandroid.data.local.entity.TaskLabelCrossRef
         PendingEditEntity::class,
         ConflictNoticeEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +34,24 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun labelDao(): LabelDao
     abstract fun pendingEditDao(): PendingEditDao
     abstract fun conflictNoticeDao(): ConflictNoticeDao
+}
+
+/**
+ * Columns for an edit that changes a task's fields: the new values, and the
+ * ones to put back if the server refuses the write outright.
+ *
+ * Nullable throughout, so the ALTERs need no default and rows queued before
+ * this version — which are all SET_DONE or CREATE_TASK, neither of which reads
+ * these — stay valid exactly as they are.
+ */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN priority INTEGER")
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN dueDateEpochMs INTEGER")
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN previousTitle TEXT")
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN previousPriority INTEGER")
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN previousDueDateEpochMs INTEGER")
+    }
 }
 
 /**
