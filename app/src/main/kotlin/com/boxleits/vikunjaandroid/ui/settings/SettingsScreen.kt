@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.boxleits.vikunjaandroid.core.agenda.WidgetHorizon
-import com.boxleits.vikunjaandroid.data.settings.WidgetSettings
+import com.boxleits.vikunjaandroid.core.agenda.WidgetSort
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,8 +112,9 @@ fun SettingsScreen(
             Text(text = "Widget", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Overdue tasks always show. If nothing falls inside the " +
-                    "range, the widget shows what's next instead of sitting empty.",
+                text = "The widget scrolls, so everything in range is reachable. " +
+                    "Overdue tasks always show, and if nothing falls inside the " +
+                    "range it shows what's next instead of sitting empty.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -129,12 +130,12 @@ fun SettingsScreen(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-            Text(text = "Maximum items", style = MaterialTheme.typography.labelLarge)
-            WidgetSettings.ITEM_COUNT_CHOICES.forEach { count ->
+            Text(text = "Order by", style = MaterialTheme.typography.labelLarge)
+            WidgetSort.entries.forEach { sort ->
                 ChoiceRow(
-                    label = count.toString(),
-                    selected = count == widgetSettings.maxItems,
-                    onSelect = { viewModel.setWidgetMaxItems(count) },
+                    label = sort.displayName(),
+                    selected = sort == widgetSettings.sort,
+                    onSelect = { viewModel.setWidgetSort(sort) },
                 )
             }
 
@@ -168,6 +169,12 @@ private fun ChoiceRow(
         RadioButton(selected = selected, onClick = onSelect)
         Text(text = label, style = MaterialTheme.typography.bodyLarge)
     }
+}
+
+private fun WidgetSort.displayName(): String = when (this) {
+    WidgetSort.DATE -> "Date"
+    WidgetSort.PRIORITY -> "Priority"
+    WidgetSort.TITLE -> "Title"
 }
 
 private fun WidgetHorizon.displayName(): String = when (this) {

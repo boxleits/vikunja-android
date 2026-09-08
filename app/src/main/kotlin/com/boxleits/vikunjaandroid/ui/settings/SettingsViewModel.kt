@@ -3,6 +3,7 @@ package com.boxleits.vikunjaandroid.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.boxleits.vikunjaandroid.core.agenda.WidgetHorizon
+import com.boxleits.vikunjaandroid.core.agenda.WidgetSort
 import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
 import com.boxleits.vikunjaandroid.data.settings.VikunjaSettings
 import com.boxleits.vikunjaandroid.data.settings.WidgetSettings
@@ -52,9 +53,9 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setWidgetMaxItems(maxItems: Int) {
+    fun setWidgetSort(sort: WidgetSort) {
         viewModelScope.launch {
-            settingsRepository.setWidgetMaxItems(maxItems)
+            settingsRepository.setWidgetSort(sort)
             widgetRefresher.refresh()
         }
     }

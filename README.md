@@ -32,7 +32,7 @@ heading hierarchy or multi-state workflow. The mapping this app uses:
 | `SCHEDULED`/`DEADLINE` | `start_date`/`due_date` | Agenda view, due date wins if both are set |
 | `:tag:` | Label | Label chip |
 | Agenda view | — | Computed client-side across all projects |
-| Agenda in the home screen widget | — | Same data, with a configurable horizon (Settings → Widget) |
+| Agenda in the home screen widget | — | Same data, scrollable, with a configurable range and order (Settings → Widget) |
 
 Since Vikunja has no subtask hierarchy of its own, the outline tree is
 reconstructed from task relations rather than stored that way on the
@@ -104,9 +104,14 @@ failing flush can't re-trigger the sync that called it.
 |---|---|
 | Onboarding | Right after connecting |
 | Pull to refresh, *Sync now* | On demand |
-| Foreground | Opening the app, if the cache is more than a minute old |
+| Foreground | Opening the app, if the cache is more than 30 seconds old |
 | Periodic | Every 30 minutes, with a connection |
 | Queued edit | As soon as there's a connection, to flush the backlog |
+
+The foreground sync runs directly rather than through WorkManager. The
+scheduler's immediate-sync work is unique with KEEP, so a run left in backoff
+after a failure would silently swallow later requests — precisely when the user
+is looking at the screen.
 
 There is deliberately no push channel. Instant sync would mean either Google's
 push service, or a separate distributor app on the phone to hold the
@@ -221,7 +226,7 @@ the Gradle Plugin Portal were reachable.
 Practical effect:
 - **`:core`** is pure Kotlin/JVM (Retrofit, OkHttp, kotlinx.serialization/
   coroutines/datetime — all Maven Central). It was fully compiled and its
-  **47 unit tests were run and pass** in that environment
+  **51 unit tests were run and pass** in that environment
   (`./gradlew :core:test`).
 
   Reaching that point needed AGP kept out of the root `plugins {}` block,
@@ -246,6 +251,23 @@ Practical effect:
   never built there either (no container runtime, and the SDK download it
   performs targets the blocked host). The first `Reopen in Container` is
   its first real run.
+
+## The widget
+
+A scrolling agenda. Two settings, both app-wide (Settings → Widget):
+
+- **Range** — today, today and tomorrow, within a week, any time. Overdue is
+  always included, and if nothing falls inside the range the widget shows what
+  is next rather than sitting empty.
+- **Order** — date, priority, or title. Applied across the whole list rather
+  than within each bucket, since the widget shows one flat list.
+
+Orgzly does this differently and better in one respect: its widget is
+configured *per placed instance*, and what it shows is a saved search, with the
+ordering carried in the query itself (`o.priority`, `o.deadline`). That is the
+right model once there is something like a saved search to point at; until
+then, an explicit order setting is the honest substitute. There is no item
+limit in either — the list scrolls.
 
 ## Roadmap
 

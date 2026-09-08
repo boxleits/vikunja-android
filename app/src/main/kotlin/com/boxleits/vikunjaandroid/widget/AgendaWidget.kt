@@ -10,11 +10,14 @@ import androidx.glance.GlanceTheme
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.action.actionStartActivity
+import androidx.glance.appwidget.lazy.LazyColumn
+import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.layout.Column
 import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
+import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.text.FontWeight
@@ -54,34 +57,44 @@ private fun AgendaWidgetContent(
     settings: WidgetSettings,
     openAppIntent: Intent,
 ) {
-    val widget = widgetAgenda(agenda, settings.horizon, settings.maxItems)
+    val widget = widgetAgenda(agenda, settings.horizon, settings.sort)
 
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
             .background(GlanceTheme.colors.background)
-            .padding(12.dp)
-            .clickable(actionStartActivity(openAppIntent)),
+            .padding(12.dp),
     ) {
         Text(
             text = if (widget.showingUpcoming) "Upcoming" else "Agenda",
             style = TextStyle(fontWeight = FontWeight.Bold, color = GlanceTheme.colors.onBackground),
+            modifier = GlanceModifier.clickable(actionStartActivity(openAppIntent)),
         )
         Spacer(modifier = GlanceModifier.height(8.dp))
         if (widget.items.isEmpty()) {
             Text(
                 text = "Nothing scheduled",
                 style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant),
+                modifier = GlanceModifier.clickable(actionStartActivity(openAppIntent)),
             )
         } else {
-            // Dates only earn their space once the items aren't all imminent.
-            widget.items.forEach { item -> AgendaWidgetRow(item, showDate = widget.showingUpcoming) }
+            // LazyColumn rather than Column: it becomes a RemoteViews
+            // collection, which scrolls. A plain Column silently clips at the
+            // widget's height, which is what made an item cap necessary before.
+            LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
+                items(widget.items) { item ->
+                    // The click has to live on each row: a LazyColumn's items
+                    // are separate RemoteViews, so an action on the parent
+                    // doesn't reach them.
+                    AgendaWidgetRow(item, showDate = widget.showingUpcoming, openAppIntent = openAppIntent)
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun AgendaWidgetRow(item: AgendaItem, showDate: Boolean) {
+private fun AgendaWidgetRow(item: AgendaItem, showDate: Boolean, openAppIntent: Intent) {
     val label = buildString {
         val marker = item.task.priority.orgMarker
         if (marker.isNotEmpty()) {
@@ -98,6 +111,9 @@ private fun AgendaWidgetRow(item: AgendaItem, showDate: Boolean) {
         text = label,
         style = TextStyle(color = GlanceTheme.colors.onBackground),
         maxLines = 1,
-        modifier = GlanceModifier.padding(vertical = 2.dp),
+        modifier = GlanceModifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable(actionStartActivity(openAppIntent)),
     )
 }

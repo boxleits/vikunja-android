@@ -2,11 +2,11 @@ package com.boxleits.vikunjaandroid.data.settings
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.boxleits.vikunjaandroid.core.agenda.WidgetHorizon
+import com.boxleits.vikunjaandroid.core.agenda.WidgetSort
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -43,7 +43,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
             horizon = prefs[KEY_WIDGET_HORIZON]
                 ?.let { name -> WidgetHorizon.entries.firstOrNull { it.name == name } }
                 ?: WidgetSettings.DEFAULT.horizon,
-            maxItems = prefs[KEY_WIDGET_MAX_ITEMS] ?: WidgetSettings.DEFAULT.maxItems,
+            sort = prefs[KEY_WIDGET_SORT]
+                ?.let { name -> WidgetSort.entries.firstOrNull { it.name == name } }
+                ?: WidgetSettings.DEFAULT.sort,
         )
     }
 
@@ -51,8 +53,8 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         dataStore.edit { prefs -> prefs[KEY_WIDGET_HORIZON] = horizon.name }
     }
 
-    suspend fun setWidgetMaxItems(maxItems: Int) {
-        dataStore.edit { prefs -> prefs[KEY_WIDGET_MAX_ITEMS] = maxItems }
+    suspend fun setWidgetSort(sort: WidgetSort) {
+        dataStore.edit { prefs -> prefs[KEY_WIDGET_SORT] = sort.name }
     }
 
     suspend fun save(settings: VikunjaSettings) {
@@ -75,6 +77,6 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         val KEY_API_TOKEN = stringPreferencesKey("api_token")
         val KEY_LAST_SYNCED_AT_EPOCH_MS = longPreferencesKey("last_synced_at_epoch_ms")
         val KEY_WIDGET_HORIZON = stringPreferencesKey("widget_horizon")
-        val KEY_WIDGET_MAX_ITEMS = intPreferencesKey("widget_max_items")
+        val KEY_WIDGET_SORT = stringPreferencesKey("widget_sort")
     }
 }

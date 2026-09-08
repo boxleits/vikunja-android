@@ -2,7 +2,6 @@ package com.boxleits.vikunjaandroid
 
 import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
-import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Configuration
 import com.boxleits.vikunjaandroid.data.sync.ForegroundSyncObserver
 import dagger.hilt.android.HiltAndroidApp
@@ -26,6 +25,6 @@ class VikunjaApplication : Application(), Configuration.Provider {
         // Hilt injects during its own onCreate, so the fields above are only
         // safe to touch after this call.
         super.onCreate()
-        ProcessLifecycleOwner.get().lifecycle.addObserver(foregroundSyncObserver)
+        registerActivityLifecycleCallbacks(foregroundSyncObserver)
     }
 }

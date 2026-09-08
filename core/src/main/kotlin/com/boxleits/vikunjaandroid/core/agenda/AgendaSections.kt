@@ -77,6 +77,38 @@ enum class WidgetHorizon {
 }
 
 /**
+ * How the widget orders what it shows.
+ *
+ * Orgzly has no equivalent setting: its widget renders a saved search, and the
+ * ordering rides along in the query string. Without a query language of our
+ * own, an explicit choice is the honest substitute.
+ */
+enum class WidgetSort {
+    /** Soonest first — what an agenda is usually for. */
+    DATE,
+
+    /** Highest priority first, date breaking ties. */
+    PRIORITY,
+
+    /** Alphabetical, for finding a known task by name. */
+    TITLE,
+}
+
+/**
+ * A ceiling on how much the widget builds, not a user setting: the list
+ * scrolls, so there is nothing to gain by cutting it short, but RemoteViews
+ * collections are not free and an unbounded list is a bad idea on a home
+ * screen.
+ */
+const val WIDGET_MAX_ITEMS = 100
+
+private fun WidgetSort.comparator(): Comparator<AgendaItem> = when (this) {
+    WidgetSort.DATE -> compareBy({ it.date }, { -it.task.priority.value }, { it.task.title })
+    WidgetSort.PRIORITY -> compareBy({ -it.task.priority.value }, { it.date }, { it.task.title })
+    WidgetSort.TITLE -> compareBy({ it.task.title.lowercase() }, { it.date })
+}
+
+/**
  * What the home screen widget shows: whatever falls inside the chosen
  * horizon, or — rather than sitting empty when nothing is due that soon —
  * the next items beyond it. [showingUpcoming] lets the widget say which.
@@ -89,7 +121,8 @@ data class WidgetAgenda(
 fun widgetAgenda(
     sections: AgendaSections,
     horizon: WidgetHorizon,
-    limit: Int,
+    sort: WidgetSort = WidgetSort.DATE,
+    limit: Int = WIDGET_MAX_ITEMS,
 ): WidgetAgenda {
     // Overdue is in every horizon: something already late is the last thing
     // a widget should hide.
@@ -101,7 +134,10 @@ fun widgetAgenda(
         if (horizon >= WidgetHorizon.EVERYTHING) addAll(sections.later)
     }
     if (within.isNotEmpty()) {
-        return WidgetAgenda(within.take(limit), showingUpcoming = false)
+        // Sorted across buckets rather than within them: the widget shows one
+        // flat list, so an order that only held inside each bucket would look
+        // arbitrary where the buckets meet.
+        return WidgetAgenda(within.sortedWith(sort.comparator()).take(limit), showingUpcoming = false)
     }
 
     val beyond = buildList {
@@ -109,7 +145,7 @@ fun widgetAgenda(
         if (horizon < WidgetHorizon.THIS_WEEK) addAll(sections.thisWeek)
         if (horizon < WidgetHorizon.EVERYTHING) addAll(sections.later)
     }
-    return WidgetAgenda(beyond.take(limit), showingUpcoming = true)
+    return WidgetAgenda(beyond.sortedWith(sort.comparator()).take(limit), showingUpcoming = true)
 }
 
 private fun bucketFor(date: LocalDate, today: LocalDate): AgendaBucket {

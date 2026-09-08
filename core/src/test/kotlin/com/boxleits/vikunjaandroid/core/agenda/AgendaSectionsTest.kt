@@ -162,4 +162,78 @@ class AgendaSectionsTest {
 
         assertThat(agenda.today.map { it.task.id }).containsExactly(2L, 3L, 1L).inOrder()
     }
+
+    @Test
+    fun `widget sorting by date puts the soonest first, across buckets`() {
+        val tasks = listOf(
+            sampleTask(id = 1, title = "Later low", dueDate = instantFor(LocalDate(2024, 1, 14))),
+            sampleTask(id = 2, title = "Overdue", dueDate = instantFor(LocalDate(2024, 1, 5))),
+            sampleTask(id = 3, title = "Today", dueDate = instantFor(today)),
+        )
+
+        val widget = widgetAgenda(
+            buildAgenda(tasks, today, timeZone),
+            WidgetHorizon.EVERYTHING,
+            sort = WidgetSort.DATE,
+        )
+
+        assertThat(widget.items.map { it.task.id }).containsExactly(2L, 3L, 1L).inOrder()
+    }
+
+    @Test
+    fun `widget sorting by priority beats the date order`() {
+        val tasks = listOf(
+            sampleTask(id = 1, title = "Soon but trivial", dueDate = instantFor(today), priority = Priority.UNSET),
+            sampleTask(
+                id = 2,
+                title = "Far off but urgent",
+                dueDate = instantFor(LocalDate(2024, 2, 1)),
+                priority = Priority.DO_NOW,
+            ),
+        )
+
+        val widget = widgetAgenda(
+            buildAgenda(tasks, today, timeZone),
+            WidgetHorizon.EVERYTHING,
+            sort = WidgetSort.PRIORITY,
+        )
+
+        assertThat(widget.items.map { it.task.id }).containsExactly(2L, 1L).inOrder()
+    }
+
+    @Test
+    fun `widget sorting by title ignores case`() {
+        val tasks = listOf(
+            sampleTask(id = 1, title = "banana", dueDate = instantFor(today)),
+            sampleTask(id = 2, title = "Apple", dueDate = instantFor(today)),
+        )
+
+        val widget = widgetAgenda(
+            buildAgenda(tasks, today, timeZone),
+            WidgetHorizon.EVERYTHING,
+            sort = WidgetSort.TITLE,
+        )
+
+        assertThat(widget.items.map { it.task.id }).containsExactly(2L, 1L).inOrder()
+    }
+
+    @Test
+    fun `the fallback to upcoming items is sorted too`() {
+        // Nothing due today, so the widget falls back — that list needs the
+        // chosen order just as much as the primary one.
+        val tasks = listOf(
+            sampleTask(id = 1, title = "zulu", dueDate = instantFor(LocalDate(2024, 2, 1))),
+            sampleTask(id = 2, title = "alpha", dueDate = instantFor(LocalDate(2024, 2, 2))),
+        )
+
+        val widget = widgetAgenda(
+            buildAgenda(tasks, today, timeZone),
+            WidgetHorizon.TODAY,
+            sort = WidgetSort.TITLE,
+        )
+
+        assertThat(widget.showingUpcoming).isTrue()
+        assertThat(widget.items.map { it.task.id }).containsExactly(2L, 1L).inOrder()
+    }
+
 }
