@@ -5,9 +5,15 @@ An Android client for [Vikunja](https://vikunja.io) built to *feel* like
 an agenda view of what's due, and a home screen widget — instead of a plain
 flat to-do list.
 
-This is v1, scoped deliberately narrow: **read-only**. It syncs projects,
-tasks and labels from a Vikunja instance into a local database and renders
-them; it does not create, edit, or complete tasks yet (see [Roadmap](#roadmap)).
+Scope so far: it syncs projects, tasks and labels from a Vikunja instance
+into a local database and renders them. The **one edit it supports is
+ticking a task done or not-done from the outline** — creating tasks and
+editing anything else is still to come (see [Roadmap](#roadmap)).
+
+That write goes straight to the server: it's applied locally first so the
+checkbox reacts immediately, then sent, and reverted if the server rejects
+it. There is **no offline queue**, so a tick made with no connection fails
+and undoes itself rather than syncing later.
 
 ## Why it looks the way it does
 
@@ -155,10 +161,12 @@ Practical effect:
 
 Roughly in order:
 
-1. Run it: install the debug APK, point it at a real Vikunja instance, and
-   fix what breaks. Nothing below the compiler has been exercised yet.
-2. Editing: toggle done, change priority/labels/dates from the outline.
-3. Two-way sync with an offline edit queue and conflict handling.
+1. More editing: change priority, labels and dates from the outline
+   (toggling done is in).
+2. Two-way sync with an offline edit queue and conflict handling. Needed
+   before edits can be trusted: the periodic sync replaces the local
+   database wholesale, so any write that hasn't reached the server yet is
+   lost when it runs.
 4. Quick-capture (an "Inbox" project, fast add from outside the app).
 5. Swipe gestures for state/priority changes, notifications for due tasks.
 6. Encrypted token storage.

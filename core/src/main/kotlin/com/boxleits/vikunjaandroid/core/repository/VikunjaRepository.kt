@@ -8,7 +8,11 @@ import com.boxleits.vikunjaandroid.core.model.Project
 import com.boxleits.vikunjaandroid.core.model.Task
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import retrofit2.HttpException
+import retrofit2.Response
 import java.io.IOException
 
 data class SyncSnapshot(
@@ -20,16 +24,49 @@ data class SyncSnapshot(
 
 interface VikunjaRepository {
     suspend fun fetchSnapshot(): SyncSnapshot
+
+    /** Marks a task done/not-done, returning the task as the server left it. */
+    suspend fun setTaskDone(taskId: Long, done: Boolean): Task
 }
 
-/** Pulls the full task/project/label state from a Vikunja instance. Read-only: no writes. */
+private const val FIELD_DONE = "done"
+
 class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
+
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
 
     override suspend fun fetchSnapshot(): SyncSnapshot = wrapErrors {
         val projects = api.getProjects().map { it.toDomain() }
         val labels = api.getLabels().map { it.toDomain() }
         val tasks = fetchAllTasks()
         SyncSnapshot(projects = projects, tasks = tasks, labels = labels, syncedAt = Clock.System.now())
+    }
+
+    /**
+     * Read-modify-write: fetches the task's own JSON, flips `done` in it, and
+     * posts the whole object back.
+     *
+     * Sending a bare `{"done": …}` would be one request instead of two, but
+     * Vikunja's update writes an explicit column list — title and description
+     * among them — so a field missing from the payload risks being written as
+     * empty. Round-tripping the server's own object keeps every field this
+     * client doesn't model intact.
+     */
+    override suspend fun setTaskDone(taskId: Long, done: Boolean): Task = wrapErrors {
+        val current = requireBody(api.getTaskJson(taskId))
+        val updated = JsonObject(current + (FIELD_DONE to JsonPrimitive(done)))
+        val saved = requireBody(api.updateTaskJson(taskId, updated))
+        json.decodeFromJsonElement(TaskDto.serializer(), saved).toDomain()
+    }
+
+    private fun requireBody(response: Response<JsonObject>): JsonObject {
+        if (!response.isSuccessful) {
+            if (response.code() == 401) throw VikunjaSyncException.Unauthorized()
+            throw VikunjaSyncException.Server(response.code(), response.errorBody()?.string())
+        }
+        return response.body()
+            ?: throw VikunjaSyncException.Server(response.code(), "Empty response body")
     }
 
     private suspend fun fetchAllTasks(): List<Task> {

@@ -3,8 +3,12 @@ package com.boxleits.vikunjaandroid.core.api
 import com.boxleits.vikunjaandroid.core.api.dto.LabelDto
 import com.boxleits.vikunjaandroid.core.api.dto.ProjectDto
 import com.boxleits.vikunjaandroid.core.api.dto.TaskDto
+import kotlinx.serialization.json.JsonObject
 import retrofit2.Response
+import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 /** Vikunja's stable `/api/v1` REST surface, limited to what a read-only client needs. */
@@ -35,6 +39,18 @@ interface VikunjaApi {
         @Query("page") page: Int,
         @Query("per_page") perPage: Int = DEFAULT_PAGE_SIZE,
     ): Response<List<TaskDto>>
+
+    /**
+     * One task as its raw JSON. Deliberately not a [TaskDto]: this is half of
+     * a read-modify-write, and decoding into our own subset would silently
+     * drop every field this client doesn't model when the object is sent back.
+     */
+    @GET("api/v1/tasks/{id}")
+    suspend fun getTaskJson(@Path("id") id: Long): Response<JsonObject>
+
+    /** Updates one task. Vikunja uses POST (not PUT) for this. */
+    @POST("api/v1/tasks/{id}")
+    suspend fun updateTaskJson(@Path("id") id: Long, @Body task: JsonObject): Response<JsonObject>
 
     companion object {
         const val DEFAULT_PAGE_SIZE = 50

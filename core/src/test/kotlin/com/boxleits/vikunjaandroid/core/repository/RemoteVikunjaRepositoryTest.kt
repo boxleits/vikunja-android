@@ -3,6 +3,12 @@ package com.boxleits.vikunjaandroid.core.repository
 import com.boxleits.vikunjaandroid.core.api.VikunjaApiClient
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Instant
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -108,6 +114,77 @@ class RemoteVikunjaRepositoryTest {
         assertThat(serverError.statusCode).isEqualTo(400)
         assertThat(serverError.message).contains("400")
         assertThat(serverError.message).contains("Invalid model provided")
+    }
+
+    @Test
+    fun `setTaskDone round-trips the server's own object, preserving unmodelled fields`() = runTest {
+        // Fields this client knows nothing about must survive the write, or a
+        // toggle would quietly clear them server-side.
+        val serverTask = """
+            {
+              "id": 7,
+              "project_id": 1,
+              "title": "Buy milk",
+              "description": "semi-skimmed",
+              "done": false,
+              "percent_done": 40,
+              "hex_color": "aabbcc",
+              "assignees": [{"id": 3}],
+              "some_future_field": {"nested": true}
+            }
+        """.trimIndent()
+        server.enqueue(MockResponse().setBody(serverTask))
+        server.enqueue(MockResponse().setBody(serverTask.replace("\"done\": false", "\"done\": true")))
+
+        repository.setTaskDone(taskId = 7, done = true)
+
+        val getRequest = server.takeRequest()
+        assertThat(getRequest.method).isEqualTo("GET")
+        assertThat(getRequest.path).isEqualTo("/api/v1/tasks/7")
+
+        val postRequest = server.takeRequest()
+        assertThat(postRequest.method).isEqualTo("POST")
+        assertThat(postRequest.path).isEqualTo("/api/v1/tasks/7")
+
+        val sent = Json.parseToJsonElement(postRequest.body.readUtf8()).jsonObject
+        assertThat(sent["done"]!!.jsonPrimitive.boolean).isTrue()
+        assertThat(sent["title"]!!.jsonPrimitive.content).isEqualTo("Buy milk")
+        assertThat(sent["description"]!!.jsonPrimitive.content).isEqualTo("semi-skimmed")
+        assertThat(sent["percent_done"]!!.jsonPrimitive.int).isEqualTo(40)
+        assertThat(sent["hex_color"]!!.jsonPrimitive.content).isEqualTo("aabbcc")
+        // Not modelled by TaskDto at all — the point of the round-trip.
+        assertThat(sent).containsKey("assignees")
+        assertThat(sent).containsKey("some_future_field")
+    }
+
+    @Test
+    fun `setTaskDone returns the task as the server left it`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"id":7,"project_id":1,"title":"T","done":false}"""))
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"T","done":true,"done_at":"2024-01-15T10:30:00Z"}""",
+            ),
+        )
+
+        val task = repository.setTaskDone(taskId = 7, done = true)
+
+        assertThat(task.done).isTrue()
+        assertThat(task.doneAt).isEqualTo(Instant.parse("2024-01-15T10:30:00Z"))
+    }
+
+    @Test
+    fun `setTaskDone does not write when the read fails`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(404))
+
+        val exception = try {
+            repository.setTaskDone(taskId = 7, done = true)
+            null
+        } catch (e: VikunjaSyncException) {
+            e
+        }
+
+        assertThat(exception).isInstanceOf(VikunjaSyncException.Server::class.java)
+        assertThat(server.requestCount).isEqualTo(1)
     }
 
     @Test
