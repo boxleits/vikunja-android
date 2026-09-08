@@ -154,9 +154,13 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
         // The read this write is built on doubles as the conflict check, so
         // detecting one costs no extra request — and crucially the POST is
         // never sent, rather than sent and regretted.
-        if (expectedUpdatedAt != null && currentTask.updatedAt != expectedUpdatedAt) {
+        if (expectedUpdatedAt != null &&
+            currentTask.updatedAt?.toServerPrecision() != expectedUpdatedAt.toServerPrecision()
+        ) {
             // Any difference counts, not only a newer stamp: either way this is
-            // no longer the task the edit was made against.
+            // no longer the task the edit was made against. A task that has
+            // stopped reporting `updated` at all counts too — unknown is not
+            // the same as unchanged.
             return@wrapErrors TaskWriteResult.Conflict(currentTask)
         }
 
@@ -187,6 +191,23 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
         )
         task.copy(parentTaskId = parentTaskId)
     }
+
+    /**
+     * Drops sub-second digits before comparing two `updated` stamps.
+     *
+     * Vikunja stores the column as a DATETIME through xorm, which writes it
+     * formatted to whole seconds — but the task in a create or update
+     * *response* is serialised from the in-memory struct, where xorm left the
+     * full-precision `time.Now()` it generated. So the same write reports
+     * `…:12.345678901Z` in its response and reads back as `…:12Z` on the next
+     * fetch. Comparing exactly makes this device's own successful write look
+     * like somebody else's change, which is how a task edited offline and then
+     * synced came back as a conflict with itself.
+     *
+     * Whole seconds is the precision the server actually keeps, so it is the
+     * precision worth comparing. Nothing is lost that the database ever held.
+     */
+    private fun Instant.toServerPrecision(): Instant = Instant.fromEpochSeconds(epochSeconds)
 
     private fun requireBody(response: Response<JsonObject>): JsonObject {
         if (!response.isSuccessful) {

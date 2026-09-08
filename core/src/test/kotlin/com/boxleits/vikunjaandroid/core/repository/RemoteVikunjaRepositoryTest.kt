@@ -234,6 +234,61 @@ class RemoteVikunjaRepositoryTest {
     }
 
     @Test
+    fun `a base version from a write response still matches what the server reads back`() = runTest {
+        // Reported from a device: a task created offline, then edited offline,
+        // came back as a conflict with itself on the first sync — and the
+        // conflict handling then replaced it with the server's copy, losing the
+        // priority and due date the edit carried.
+        //
+        // Vikunja's `updated` column is a DATETIME that xorm writes formatted
+        // to whole seconds, but the task in a create or update *response* is
+        // serialised from the in-memory struct, where the full-precision
+        // time.Now() is still sitting. So a write reports one stamp and reads
+        // back as another, and an exact comparison calls that somebody else's
+        // change.
+        val fromWriteResponse = Instant.parse("2024-01-15T10:00:00.345678901Z")
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"T","updated":"2024-01-15T10:00:00Z"}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"Edited","updated":"2024-01-15T10:05:00Z"}""",
+            ),
+        )
+
+        val result = repository.updateTask(
+            taskId = 7,
+            edits = TaskEdits(title = "Edited", priority = Priority.HIGH, dueDate = null),
+            expectedUpdatedAt = fromWriteResponse,
+        )
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Applied::class.java)
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `a difference of whole seconds is still a conflict`() = runTest {
+        // The precision tolerance must not swallow a real change: one second
+        // apart is a different version, not a rounding artefact.
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"Renamed elsewhere","updated":"2024-01-15T10:00:01Z"}""",
+            ),
+        )
+
+        val result = repository.setTaskDone(
+            taskId = 7,
+            done = true,
+            expectedUpdatedAt = Instant.parse("2024-01-15T10:00:00.900000000Z"),
+        )
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Conflict::class.java)
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
     fun `setTaskDone treats a task with no server timestamp as a conflict against a known base`() = runTest {
         // A server that stops sending `updated` must not be read as "unchanged".
         server.enqueue(MockResponse().setBody("""{"id":7,"project_id":1,"title":"T","done":false}"""))

@@ -265,10 +265,18 @@ class TaskEditRepository @Inject constructor(
                             // Anything else queued against the placeholder — an
                             // edit made before the create had been sent — now
                             // has a real task to name.
+                            //
+                            // With no base version: an edit made against a
+                            // placeholder was never made against a server
+                            // version, so there is nothing for it to conflict
+                            // with. Adopting the stamp from this create instead
+                            // would claim the user edited a version they never
+                            // saw, and the task is seconds old and known only
+                            // to this device — nobody else can have touched it.
                             pendingDao.remapTaskId(
                                 oldTaskId = edit.taskId,
                                 newTaskId = created.id,
-                                updatedAtEpochMs = created.updatedAt?.toEpochMilliseconds(),
+                                updatedAtEpochMs = null,
                             )
                         }
                         pushed++

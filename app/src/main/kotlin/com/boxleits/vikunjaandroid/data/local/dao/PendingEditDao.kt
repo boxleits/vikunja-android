@@ -10,7 +10,14 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface PendingEditDao {
 
-    @Query("SELECT * FROM pending_edits ORDER BY createdAtEpochMs")
+    /**
+     * Oldest first, with the autoincrement id breaking ties.
+     *
+     * The order is load-bearing rather than cosmetic: an edit made against a
+     * task this device created has to be pushed after the create that gives
+     * that task its real id, or it names an id the server never had.
+     */
+    @Query("SELECT * FROM pending_edits ORDER BY createdAtEpochMs, id")
     suspend fun getAll(): List<PendingEditEntity>
 
     @Query("SELECT COUNT(*) FROM pending_edits")

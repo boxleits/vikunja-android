@@ -168,7 +168,17 @@ costs no extra request:
 |---|---|
 | Server's `updated` matches the recorded one | The write goes ahead |
 | It differs | **No POST is sent.** The edit is dropped, the server's version replaces the local row, and a notice is stored |
-| No recorded base (edit queued by an older build) | Check skipped — can't tell, so don't guess |
+| No recorded base (an edit made against a task this device created, or one queued by an older build) | Check skipped — nothing to conflict with, or can't tell |
+
+The comparison is made to **whole seconds**, which is not a tolerance but the
+precision the server has. Vikunja's `updated` column is a DATETIME that xorm
+writes formatted to seconds, while the task in a create or update *response* is
+serialised from the in-memory struct, where the full-precision `time.Now()` is
+still sitting. The same write therefore reports `…:12.345678901Z` in its
+response and reads back as `…:12Z` on the next fetch. Comparing exactly made
+this device's own successful write look like somebody else's change — which is
+how a task created offline, edited offline, and then synced came back as a
+conflict with itself.
 
 The local edit is discarded rather than merged, and keeping the local value
 quietly is exactly the silent overwrite the check exists to prevent. That was
