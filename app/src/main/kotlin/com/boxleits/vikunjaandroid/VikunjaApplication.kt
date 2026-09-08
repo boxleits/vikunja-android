@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.boxleits.vikunjaandroid.data.sync.ForegroundSyncObserver
+import com.boxleits.vikunjaandroid.data.sync.NetworkChangeWatcher
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -16,6 +17,9 @@ class VikunjaApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var foregroundSyncObserver: ForegroundSyncObserver
 
+    @Inject
+    lateinit var networkChangeWatcher: NetworkChangeWatcher
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -26,5 +30,6 @@ class VikunjaApplication : Application(), Configuration.Provider {
         // safe to touch after this call.
         super.onCreate()
         registerActivityLifecycleCallbacks(foregroundSyncObserver)
+        networkChangeWatcher.start()
     }
 }
