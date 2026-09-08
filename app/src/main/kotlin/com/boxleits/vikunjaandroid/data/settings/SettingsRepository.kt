@@ -49,6 +49,13 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         )
     }
 
+    /** The project a task was last created in — the useful default for the next one. */
+    val lastProjectIdFlow: Flow<Long?> = dataStore.data.map { prefs -> prefs[KEY_LAST_PROJECT_ID] }
+
+    suspend fun setLastProjectId(projectId: Long) {
+        dataStore.edit { prefs -> prefs[KEY_LAST_PROJECT_ID] = projectId }
+    }
+
     suspend fun setAgendaHorizon(horizon: AgendaHorizon) {
         dataStore.edit { prefs -> prefs[KEY_WIDGET_HORIZON] = horizon.name }
     }
@@ -81,5 +88,6 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         // key would silently reset everyone to the defaults.
         val KEY_WIDGET_HORIZON = stringPreferencesKey("widget_horizon")
         val KEY_WIDGET_SORT = stringPreferencesKey("widget_sort")
+        val KEY_LAST_PROJECT_ID = longPreferencesKey("last_project_id")
     }
 }

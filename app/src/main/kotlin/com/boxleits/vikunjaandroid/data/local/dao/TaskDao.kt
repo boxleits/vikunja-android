@@ -24,6 +24,19 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id")
     suspend fun findById(id: Long): TaskEntity?
 
+    /**
+     * The lowest id in the table, used to mint the next placeholder id.
+     *
+     * Locally created tasks get negative ids: Vikunja's are positive, so the
+     * two can never collide, and the sign alone says whether a row has ever
+     * reached the server.
+     */
+    @Query("SELECT MIN(id) FROM tasks")
+    suspend fun lowestId(): Long?
+
+    @Query("DELETE FROM tasks WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
     @Query("UPDATE tasks SET done = :done, doneAtEpochMs = :doneAtEpochMs WHERE id = :id")
     suspend fun updateDone(id: Long, done: Boolean, doneAtEpochMs: Long?)
 

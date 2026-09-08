@@ -8,6 +8,7 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -51,6 +52,24 @@ interface VikunjaApi {
     /** Updates one task. Vikunja uses POST (not PUT) for this. */
     @POST("api/v1/tasks/{id}")
     suspend fun updateTaskJson(@Path("id") id: Long, @Body task: JsonObject): Response<JsonObject>
+
+    /**
+     * Creates a task in a project. Vikunja uses PUT to create and POST to
+     * update — the opposite of the usual convention, and verified against
+     * pkg/routes/routes.go rather than assumed.
+     */
+    @PUT("api/v1/projects/{project}/tasks")
+    suspend fun createTask(@Path("project") projectId: Long, @Body task: JsonObject): Response<JsonObject>
+
+    /**
+     * Relates one task to another — used to hang a new task under a parent,
+     * since Vikunja has no parent field on the task itself.
+     *
+     * Only the forward direction needs sending: Vikunja creates the inverse
+     * relation itself.
+     */
+    @PUT("api/v1/tasks/{task}/relations")
+    suspend fun createRelation(@Path("task") taskId: Long, @Body relation: JsonObject): Response<JsonObject>
 
     companion object {
         const val DEFAULT_PAGE_SIZE = 50
