@@ -24,22 +24,22 @@ import com.boxleits.vikunjaandroid.MainActivity
 import com.boxleits.vikunjaandroid.core.agenda.AgendaItem
 import com.boxleits.vikunjaandroid.core.agenda.AgendaSections
 import com.boxleits.vikunjaandroid.core.agenda.widgetAgenda
+import com.boxleits.vikunjaandroid.data.settings.WidgetSettings
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.first
-
-private const val MAX_WIDGET_ITEMS = 8
 
 class AgendaWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val repository = entryPoint(context).taskQueryRepository()
-        val agenda = repository.observeAgenda().first()
+        val entryPoint = entryPoint(context)
+        val agenda = entryPoint.taskQueryRepository().observeAgenda().first()
+        val settings = entryPoint.settingsRepository().widgetSettingsFlow.first()
 
         val openApp = Intent(context, MainActivity::class.java)
 
         provideContent {
             GlanceTheme {
-                AgendaWidgetContent(agenda, openApp)
+                AgendaWidgetContent(agenda, settings, openApp)
             }
         }
     }
@@ -49,8 +49,12 @@ class AgendaWidget : GlanceAppWidget() {
 }
 
 @Composable
-private fun AgendaWidgetContent(agenda: AgendaSections, openAppIntent: Intent) {
-    val widget = widgetAgenda(agenda, MAX_WIDGET_ITEMS)
+private fun AgendaWidgetContent(
+    agenda: AgendaSections,
+    settings: WidgetSettings,
+    openAppIntent: Intent,
+) {
+    val widget = widgetAgenda(agenda, settings.horizon, settings.maxItems)
 
     Column(
         modifier = GlanceModifier

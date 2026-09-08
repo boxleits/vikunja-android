@@ -1,11 +1,15 @@
 package com.boxleits.vikunjaandroid.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -15,15 +19,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.boxleits.vikunjaandroid.core.agenda.WidgetHorizon
+import com.boxleits.vikunjaandroid.data.settings.WidgetSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +42,8 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val lastSyncedAt by viewModel.lastSyncedAt.collectAsStateWithLifecycle()
     val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
+    val pendingEditCount by viewModel.pendingEditCount.collectAsStateWithLifecycle()
+    val widgetSettings by viewModel.widgetSettings.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -52,6 +62,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp),
         ) {
             Text(text = "Instance", style = MaterialTheme.typography.labelLarge)
@@ -66,6 +77,19 @@ fun SettingsScreen(
                 text = lastSyncedAt?.toString() ?: "Never",
                 style = MaterialTheme.typography.bodyLarge,
             )
+
+            if (pendingEditCount > 0) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(text = "Waiting to sync", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = if (pendingEditCount == 1) {
+                        "1 change made on this device"
+                    } else {
+                        "$pendingEditCount changes made on this device"
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
 
             errorMessage?.let { message ->
                 Spacer(modifier = Modifier.height(16.dp))
@@ -85,6 +109,39 @@ fun SettingsScreen(
             HorizontalDivider()
             Spacer(modifier = Modifier.height(12.dp))
 
+            Text(text = "Widget", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Overdue tasks always show. If nothing falls inside the " +
+                    "range, the widget shows what's next instead of sitting empty.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = "Show tasks due", style = MaterialTheme.typography.labelLarge)
+            WidgetHorizon.entries.forEach { horizon ->
+                ChoiceRow(
+                    label = horizon.displayName(),
+                    selected = horizon == widgetSettings.horizon,
+                    onSelect = { viewModel.setWidgetHorizon(horizon) },
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(text = "Maximum items", style = MaterialTheme.typography.labelLarge)
+            WidgetSettings.ITEM_COUNT_CHOICES.forEach { count ->
+                ChoiceRow(
+                    label = count.toString(),
+                    selected = count == widgetSettings.maxItems,
+                    onSelect = { viewModel.setWidgetMaxItems(count) },
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(12.dp))
+
             OutlinedButton(
                 onClick = { viewModel.logOut(onDone = onBack) },
                 modifier = Modifier.fillMaxWidth(),
@@ -93,4 +150,29 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ChoiceRow(
+    label: String,
+    selected: Boolean,
+    onSelect: () -> Unit,
+) {
+    Row(
+        // The whole row is the target, not just the small radio button.
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onSelect)
+        Text(text = label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+private fun WidgetHorizon.displayName(): String = when (this) {
+    WidgetHorizon.TODAY -> "Today"
+    WidgetHorizon.TOMORROW -> "Today and tomorrow"
+    WidgetHorizon.THIS_WEEK -> "Within a week"
+    WidgetHorizon.EVERYTHING -> "Any time"
 }

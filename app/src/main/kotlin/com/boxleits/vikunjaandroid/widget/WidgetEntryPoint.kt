@@ -1,5 +1,6 @@
 package com.boxleits.vikunjaandroid.widget
 
+import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
 import com.boxleits.vikunjaandroid.data.sync.TaskQueryRepository
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -10,4 +11,5 @@ import dagger.hilt.components.SingletonComponent
 @InstallIn(SingletonComponent::class)
 interface WidgetEntryPoint {
     fun taskQueryRepository(): TaskQueryRepository
+    fun settingsRepository(): SettingsRepository
 }
