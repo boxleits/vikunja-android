@@ -262,6 +262,15 @@ A scrolling agenda. Two settings, both app-wide (Settings → Widget):
 - **Order** — date, priority, or title. Applied across the whole list rather
   than within each bucket, since the widget shows one flat list.
 
+Every row carries a second line with the due (or scheduled) date *and time*,
+formatted in the device's locale. Overdue items say so and are drawn in the
+error colour — they are in every range, so without a marker they were
+indistinguishable from anything else due soon.
+
+Bucketing is by date, not by the minute: a task due today at 09:00 still counts
+as due today at 14:00, matching how an org-mode agenda reads. The time on each
+row is what makes the difference visible.
+
 Orgzly does this differently and better in one respect: its widget is
 configured *per placed instance*, and what it shows is a saved search, with the
 ordering carried in the query itself (`o.priority`, `o.deadline`). That is the

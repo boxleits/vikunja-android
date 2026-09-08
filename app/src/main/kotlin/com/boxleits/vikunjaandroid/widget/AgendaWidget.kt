@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
@@ -24,12 +25,17 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import com.boxleits.vikunjaandroid.MainActivity
+import com.boxleits.vikunjaandroid.core.agenda.AgendaBucket
 import com.boxleits.vikunjaandroid.core.agenda.AgendaItem
 import com.boxleits.vikunjaandroid.core.agenda.AgendaSections
 import com.boxleits.vikunjaandroid.core.agenda.widgetAgenda
 import com.boxleits.vikunjaandroid.data.settings.WidgetSettings
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.first
+import java.time.Instant as JavaInstant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 
 class AgendaWidget : GlanceAppWidget() {
 
@@ -86,7 +92,7 @@ private fun AgendaWidgetContent(
                     // The click has to live on each row: a LazyColumn's items
                     // are separate RemoteViews, so an action on the parent
                     // doesn't reach them.
-                    AgendaWidgetRow(item, showDate = widget.showingUpcoming, openAppIntent = openAppIntent)
+                    AgendaWidgetRow(item, openAppIntent = openAppIntent)
                 }
             }
         }
@@ -94,26 +100,60 @@ private fun AgendaWidgetContent(
 }
 
 @Composable
-private fun AgendaWidgetRow(item: AgendaItem, showDate: Boolean, openAppIntent: Intent) {
-    val label = buildString {
+private fun AgendaWidgetRow(item: AgendaItem, openAppIntent: Intent) {
+    val overdue = item.bucket == AgendaBucket.OVERDUE
+    val title = buildString {
         val marker = item.task.priority.orgMarker
         if (marker.isNotEmpty()) {
             append(marker)
             append(' ')
         }
         append(item.task.title)
-        if (showDate) {
-            append("  ")
-            append(item.date.toString())
-        }
     }
-    Text(
-        text = label,
-        style = TextStyle(color = GlanceTheme.colors.onBackground),
-        maxLines = 1,
+
+    Column(
         modifier = GlanceModifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .clickable(actionStartActivity(openAppIntent)),
-    )
+    ) {
+        Text(
+            text = title,
+            style = TextStyle(color = GlanceTheme.colors.onBackground),
+            maxLines = 1,
+        )
+        Text(
+            text = subtitleFor(item),
+            style = TextStyle(
+                fontSize = 11.sp,
+                // Overdue earns the error colour: it is the one state where
+                // the date is not just information but a problem.
+                color = if (overdue) GlanceTheme.colors.error else GlanceTheme.colors.onSurfaceVariant,
+            ),
+            maxLines = 1,
+        )
+    }
 }
+
+/**
+ * "Due 8 Sept 2026, 09:00" / "Overdue · 5 Sept 2026, 17:30".
+ *
+ * Formatted with java.time rather than in :core so the date and time follow
+ * the device's locale and 12/24-hour setting; :core has no notion of either.
+ */
+private fun subtitleFor(item: AgendaItem): String {
+    val formatted = DATE_TIME_FORMAT.format(
+        JavaInstant.ofEpochMilli(item.at.toEpochMilliseconds()).atZone(ZoneId.systemDefault()),
+    )
+    val prefix = when {
+        item.bucket == AgendaBucket.OVERDUE -> "Overdue \u00b7 "
+        // Says which date this is, since a task with only a start date is
+        // scheduled rather than due, and the two mean different things.
+        item.isDueDate -> "Due "
+        else -> "Scheduled "
+    }
+    return prefix + formatted
+}
+
+private val DATE_TIME_FORMAT: DateTimeFormatter =
+    DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)

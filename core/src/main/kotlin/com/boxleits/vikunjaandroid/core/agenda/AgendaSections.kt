@@ -1,6 +1,7 @@
 package com.boxleits.vikunjaandroid.core.agenda
 
 import com.boxleits.vikunjaandroid.core.model.Task
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
@@ -20,6 +21,12 @@ data class AgendaItem(
     val bucket: AgendaBucket,
     /** true if [date] came from the due date, false if it came from the scheduled/start date. */
     val isDueDate: Boolean,
+    /**
+     * The moment [date] was derived from, kept so the UI can show a time of
+     * day. [date] alone drops it, and "due today" reads very differently from
+     * "due today at 09:00" when it is already the afternoon.
+     */
+    val at: Instant,
 )
 
 data class AgendaSections(
@@ -50,7 +57,7 @@ fun buildAgenda(
             val instant = task.dueDate ?: task.startDate
             instant?.let {
                 val date = it.toLocalDateTime(timeZone).date
-                AgendaItem(task, date, bucketFor(date, today), isDueDate = task.dueDate != null)
+                AgendaItem(task, date, bucketFor(date, today), isDueDate = task.dueDate != null, at = it)
             }
         }
         .toList()
