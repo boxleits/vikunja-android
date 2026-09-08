@@ -153,9 +153,17 @@ private fun OutlineList(
     onSetDone: (taskId: Long, done: Boolean) -> Unit,
 ) {
     val collapsedIds = rememberSaveable(saver = LongSetSaver) { mutableStateOf<Set<Long>>(emptySet()) }
+    val collapsed = collapsedIds.value
+
+    // Flattened once per actual change, rather than inside the LazyColumn's
+    // content lambda: that lambda re-runs whenever anything it reads changes,
+    // so the walk over every tree was repeating on each collapse toggle.
+    val sections = remember(projectOutlines, collapsed) {
+        projectOutlines.map { it to flattenOutline(it.nodes, depth = 0, collapsedIds = collapsed) }
+    }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        projectOutlines.forEach { projectOutline ->
+        sections.forEach { (projectOutline, visibleRows) ->
             item(key = "project-${projectOutline.project.id}") {
                 Text(
                     text = projectOutline.project.title,
@@ -163,12 +171,11 @@ private fun OutlineList(
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
                 )
             }
-            val visibleRows = flattenOutline(projectOutline.nodes, depth = 0, collapsedIds = collapsedIds.value)
             items(visibleRows, key = { (node, _) -> "task-${node.task.id}" }) { (node, depth) ->
                 OutlineTaskRow(
                     node = node,
                     depth = depth,
-                    isCollapsed = node.task.id in collapsedIds.value,
+                    isCollapsed = node.task.id in collapsed,
                     onToggleCollapse = {
                         collapsedIds.value = collapsedIds.value.toggle(node.task.id)
                     },
