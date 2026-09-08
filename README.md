@@ -6,9 +6,9 @@ an agenda view of what's due, and a home screen widget — instead of a plain
 flat to-do list.
 
 Scope so far: it syncs projects, tasks and labels from a Vikunja instance
-into a local database and renders them. The **one edit it supports is
-ticking a task done or not-done from the outline** — creating tasks and
-editing anything else is still to come (see [Roadmap](#roadmap)).
+into a local database and renders them. It can **create a task** and **tick one
+done or not-done**; editing anything else — title, dates, priority, labels — is
+still to come (see [Roadmap](#roadmap)).
 
 Edits are applied locally first so the UI reacts immediately, then queued
 and pushed. A change that can't be sent right now — no connection, server
@@ -68,6 +68,16 @@ about. `:app` is the thin Android shell around it.
 Reads are one-way and wholesale: each sync fetches every project, label and
 task and replaces the local database in a single transaction. The UI only
 ever observes Room, so the app works offline with the last synced data.
+
+Creating a task is the awkward case, and worth stating plainly. An edit names
+a task the server already knows; a creation has to invent an identity and later
+reconcile it. A new task is written immediately under a **negative placeholder
+id** — Vikunja's ids are positive, so the sign alone says whether a row has ever
+reached the server — and queued. When the server accepts it, the placeholder row
+is deleted and the server's version inserted in its place. A sync re-inserts
+placeholders after the wholesale replace, which would otherwise delete a task
+the server has never heard of. A creation the server *refuses* takes its
+placeholder with it: there is no earlier state to roll back to.
 
 Writes go through a queue (`pending_edits`):
 
@@ -238,7 +248,7 @@ the Gradle Plugin Portal were reachable.
 Practical effect:
 - **`:core`** is pure Kotlin/JVM (Retrofit, OkHttp, kotlinx.serialization/
   coroutines/datetime — all Maven Central). It was fully compiled and its
-  **54 unit tests were run and pass** in that environment
+  **58 unit tests were run and pass** in that environment
   (`./gradlew :core:test`).
 
   Reaching that point needed AGP kept out of the root `plugins {}` block,
@@ -301,12 +311,16 @@ limit in either — the list scrolls.
 
 Roughly in order:
 
-1. More editing: change priority, labels and dates from the outline
+1. Creating subtasks. Creating top-level tasks is in; hanging one under a
+   parent needs a second request (Vikunja keeps hierarchy in relations, not on
+   the task) and, when the parent is itself an unsynced placeholder, a way to
+   rewrite the reference once the real id arrives.
+2. More editing: change title, priority, labels and dates from the outline
    (toggling done is in, and rides the same queue).
-2. Conflict handling for richer edits. Detection is in (see
+3. Conflict handling for richer edits. Detection is in (see
    [Conflicts](#conflicts)); once text fields are editable, "server wins" stops
    being good enough and the losing version needs to be kept and shown rather
    than dropped.
-3. Quick-capture (an "Inbox" project, fast add from outside the app).
+4. Quick-capture from outside the app — a share target and a widget button.
 4. Swipe gestures for state/priority changes, notifications for due tasks.
-5. Encrypted token storage.
+6. Encrypted token storage.

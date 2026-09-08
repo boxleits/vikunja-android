@@ -25,7 +25,7 @@ import com.boxleits.vikunjaandroid.data.local.entity.TaskLabelCrossRef
         PendingEditEntity::class,
         ConflictNoticeEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,6 +44,13 @@ abstract class AppDatabase : RoomDatabase() {
  * need no default and existing rows simply have no recorded base version —
  * which the flush treats as "can't tell", not as a conflict.
  */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN title TEXT")
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN projectId INTEGER")
+    }
+}
+
 val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE tasks ADD COLUMN updatedAtEpochMs INTEGER")

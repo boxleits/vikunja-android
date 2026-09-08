@@ -1,6 +1,7 @@
 package com.boxleits.vikunjaandroid.core.repository
 
 import com.boxleits.vikunjaandroid.core.api.VikunjaApi
+import com.boxleits.vikunjaandroid.core.api.dto.RELATION_KIND_PARENT_TASK
 import com.boxleits.vikunjaandroid.core.api.dto.TaskDto
 import com.boxleits.vikunjaandroid.core.mapper.toDomain
 import com.boxleits.vikunjaandroid.core.model.Label
@@ -50,9 +51,20 @@ interface VikunjaRepository {
         done: Boolean,
         expectedUpdatedAt: Instant? = null,
     ): TaskWriteResult
+
+    /**
+     * Creates a task, optionally hung under [parentTaskId].
+     *
+     * Returns the task as the server created it, which is the only place its
+     * real id comes from — a locally created task has none until this returns.
+     */
+    suspend fun createTask(projectId: Long, title: String, parentTaskId: Long? = null): Task
 }
 
 private const val FIELD_DONE = "done"
+private const val FIELD_TITLE = "title"
+private const val FIELD_OTHER_TASK_ID = "other_task_id"
+private const val FIELD_RELATION_KIND = "relation_kind"
 
 class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
 
@@ -96,6 +108,30 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
         val updated = JsonObject(current + (FIELD_DONE to JsonPrimitive(done)))
         val saved = requireBody(api.updateTaskJson(taskId, updated))
         TaskWriteResult.Applied(json.decodeFromJsonElement(TaskDto.serializer(), saved).toDomain())
+    }
+
+    override suspend fun createTask(projectId: Long, title: String, parentTaskId: Long?): Task = wrapErrors {
+        val created = requireBody(api.createTask(projectId, JsonObject(mapOf(FIELD_TITLE to JsonPrimitive(title)))))
+        val task = json.decodeFromJsonElement(TaskDto.serializer(), created).toDomain()
+
+        if (parentTaskId == null) return@wrapErrors task
+
+        // A second request, because Vikunja has no parent field on the task
+        // itself — the hierarchy lives in relations. The task exists either
+        // way by this point; a failure here leaves it correctly created but at
+        // the top level, which is recoverable, unlike losing it.
+        requireBody(
+            api.createRelation(
+                taskId = task.id,
+                relation = JsonObject(
+                    mapOf(
+                        FIELD_OTHER_TASK_ID to JsonPrimitive(parentTaskId),
+                        FIELD_RELATION_KIND to JsonPrimitive(RELATION_KIND_PARENT_TASK),
+                    ),
+                ),
+            ),
+        )
+        task.copy(parentTaskId = parentTaskId)
     }
 
     private fun requireBody(response: Response<JsonObject>): JsonObject {
