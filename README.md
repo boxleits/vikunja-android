@@ -32,7 +32,7 @@ heading hierarchy or multi-state workflow. The mapping this app uses:
 | `SCHEDULED`/`DEADLINE` | `start_date`/`due_date` | Agenda view, due date wins if both are set |
 | `:tag:` | Label | Label chip |
 | Agenda view | — | Computed client-side across all projects |
-| Agenda in the home screen widget | — | Same data, scrollable, with a configurable range and order (Settings → Widget) |
+| Agenda in the home screen widget | — | Same data and same settings as the Agenda screen, scrollable |
 
 Since Vikunja has no subtask hierarchy of its own, the outline tree is
 reconstructed from task relations rather than stored that way on the
@@ -226,7 +226,7 @@ the Gradle Plugin Portal were reachable.
 Practical effect:
 - **`:core`** is pure Kotlin/JVM (Retrofit, OkHttp, kotlinx.serialization/
   coroutines/datetime — all Maven Central). It was fully compiled and its
-  **51 unit tests were run and pass** in that environment
+  **54 unit tests were run and pass** in that environment
   (`./gradlew :core:test`).
 
   Reaching that point needed AGP kept out of the root `plugins {}` block,
@@ -252,9 +252,10 @@ Practical effect:
   performs targets the blocked host). The first `Reopen in Container` is
   its first real run.
 
-## The widget
+## The agenda
 
-A scrolling agenda. Two settings, both app-wide (Settings → Widget):
+One setting governs both the Agenda screen and the home screen widget
+(Settings → Agenda), so the two cannot disagree about what "my agenda" is:
 
 - **Range** — today, today and tomorrow, within a week, any time. Overdue is
   always included, and if nothing falls inside the range the widget shows what
@@ -270,6 +271,12 @@ indistinguishable from anything else due soon.
 Bucketing is by date, not by the minute: a task due today at 09:00 still counts
 as due today at 14:00, matching how an org-mode agenda reads. The time on each
 row is what makes the difference visible.
+
+The widget collects its data inside the Glance composition rather than reading
+it once beforehand. `provideContent` starts a session that outlives a single
+draw, and a later `update()` recomposes *that* session — so anything captured
+before it is frozen for the session's lifetime. Reading it up front is why the
+widget used to ignore a settings change.
 
 Orgzly does this differently and better in one respect: its widget is
 configured *per placed instance*, and what it shows is a saved search, with the

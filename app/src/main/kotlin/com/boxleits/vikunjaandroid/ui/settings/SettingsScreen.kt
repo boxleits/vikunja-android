@@ -30,8 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.boxleits.vikunjaandroid.core.agenda.WidgetHorizon
-import com.boxleits.vikunjaandroid.core.agenda.WidgetSort
+import com.boxleits.vikunjaandroid.core.agenda.AgendaHorizon
+import com.boxleits.vikunjaandroid.core.agenda.AgendaSort
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,7 +43,7 @@ fun SettingsScreen(
     val lastSyncedAt by viewModel.lastSyncedAt.collectAsStateWithLifecycle()
     val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
     val pendingEditCount by viewModel.pendingEditCount.collectAsStateWithLifecycle()
-    val widgetSettings by viewModel.widgetSettings.collectAsStateWithLifecycle()
+    val agendaSettings by viewModel.agendaSettings.collectAsStateWithLifecycle()
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -109,33 +109,34 @@ fun SettingsScreen(
             HorizontalDivider()
             Spacer(modifier = Modifier.height(12.dp))
 
-            Text(text = "Widget", style = MaterialTheme.typography.titleMedium)
+            Text(text = "Agenda", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "The widget scrolls, so everything in range is reachable. " +
-                    "Overdue tasks always show, and if nothing falls inside the " +
-                    "range it shows what's next instead of sitting empty.",
+                text = "Applies to the Agenda screen and the home screen widget. " +
+                    "Overdue tasks always show. Both scroll, so everything in " +
+                    "range is reachable; where the widget would otherwise be " +
+                    "empty it shows what's next instead.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = "Show tasks due", style = MaterialTheme.typography.labelLarge)
-            WidgetHorizon.entries.forEach { horizon ->
+            AgendaHorizon.entries.forEach { horizon ->
                 ChoiceRow(
                     label = horizon.displayName(),
-                    selected = horizon == widgetSettings.horizon,
-                    onSelect = { viewModel.setWidgetHorizon(horizon) },
+                    selected = horizon == agendaSettings.horizon,
+                    onSelect = { viewModel.setAgendaHorizon(horizon) },
                 )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = "Order by", style = MaterialTheme.typography.labelLarge)
-            WidgetSort.entries.forEach { sort ->
+            AgendaSort.entries.forEach { sort ->
                 ChoiceRow(
                     label = sort.displayName(),
-                    selected = sort == widgetSettings.sort,
-                    onSelect = { viewModel.setWidgetSort(sort) },
+                    selected = sort == agendaSettings.sort,
+                    onSelect = { viewModel.setAgendaSort(sort) },
                 )
             }
 
@@ -171,15 +172,15 @@ private fun ChoiceRow(
     }
 }
 
-private fun WidgetSort.displayName(): String = when (this) {
-    WidgetSort.DATE -> "Date"
-    WidgetSort.PRIORITY -> "Priority"
-    WidgetSort.TITLE -> "Title"
+private fun AgendaSort.displayName(): String = when (this) {
+    AgendaSort.DATE -> "Date"
+    AgendaSort.PRIORITY -> "Priority"
+    AgendaSort.TITLE -> "Title"
 }
 
-private fun WidgetHorizon.displayName(): String = when (this) {
-    WidgetHorizon.TODAY -> "Today"
-    WidgetHorizon.TOMORROW -> "Today and tomorrow"
-    WidgetHorizon.THIS_WEEK -> "Within a week"
-    WidgetHorizon.EVERYTHING -> "Any time"
+private fun AgendaHorizon.displayName(): String = when (this) {
+    AgendaHorizon.TODAY -> "Today"
+    AgendaHorizon.TOMORROW -> "Today and tomorrow"
+    AgendaHorizon.THIS_WEEK -> "Within a week"
+    AgendaHorizon.EVERYTHING -> "Any time"
 }

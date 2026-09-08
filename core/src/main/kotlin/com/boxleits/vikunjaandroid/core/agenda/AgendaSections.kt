@@ -38,6 +38,10 @@ data class AgendaSections(
 ) {
     val isEmpty: Boolean
         get() = overdue.isEmpty() && today.isEmpty() && tomorrow.isEmpty() && thisWeek.isEmpty() && later.isEmpty()
+
+    companion object {
+        val EMPTY = AgendaSections(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
+    }
 }
 
 /**
@@ -75,8 +79,11 @@ fun buildAgenda(
     )
 }
 
-/** How far ahead the home screen widget looks. Overdue is always included. */
-enum class WidgetHorizon {
+/**
+ * How far ahead the agenda looks — on the screen and in the widget alike.
+ * Overdue is always included.
+ */
+enum class AgendaHorizon {
     TODAY,
     TOMORROW,
     THIS_WEEK,
@@ -84,13 +91,13 @@ enum class WidgetHorizon {
 }
 
 /**
- * How the widget orders what it shows.
+ * How the agenda orders what it shows.
  *
  * Orgzly has no equivalent setting: its widget renders a saved search, and the
  * ordering rides along in the query string. Without a query language of our
  * own, an explicit choice is the honest substitute.
  */
-enum class WidgetSort {
+enum class AgendaSort {
     /** Soonest first — what an agenda is usually for. */
     DATE,
 
@@ -109,10 +116,32 @@ enum class WidgetSort {
  */
 const val WIDGET_MAX_ITEMS = 100
 
-private fun WidgetSort.comparator(): Comparator<AgendaItem> = when (this) {
-    WidgetSort.DATE -> compareBy({ it.date }, { -it.task.priority.value }, { it.task.title })
-    WidgetSort.PRIORITY -> compareBy({ -it.task.priority.value }, { it.date }, { it.task.title })
-    WidgetSort.TITLE -> compareBy({ it.task.title.lowercase() }, { it.date })
+internal fun AgendaSort.comparator(): Comparator<AgendaItem> = when (this) {
+    AgendaSort.DATE -> compareBy({ it.date }, { -it.task.priority.value }, { it.task.title })
+    AgendaSort.PRIORITY -> compareBy({ -it.task.priority.value }, { it.date }, { it.task.title })
+    AgendaSort.TITLE -> compareBy({ it.task.title.lowercase() }, { it.date })
+}
+
+/**
+ * The same agenda, narrowed to [horizon] and re-sorted by [sort].
+ *
+ * Used by the agenda screen, which keeps its sections — unlike the widget,
+ * which flattens them. Sections outside the horizon come back empty rather
+ * than being dropped, so the caller still knows which is which. Overdue
+ * survives every horizon: something already late is the last thing to hide.
+ */
+fun AgendaSections.limitedTo(horizon: AgendaHorizon, sort: AgendaSort): AgendaSections {
+    val order = sort.comparator()
+    fun keep(items: List<AgendaItem>, included: Boolean) =
+        if (included) items.sortedWith(order) else emptyList()
+
+    return AgendaSections(
+        overdue = overdue.sortedWith(order),
+        today = today.sortedWith(order),
+        tomorrow = keep(tomorrow, horizon >= AgendaHorizon.TOMORROW),
+        thisWeek = keep(thisWeek, horizon >= AgendaHorizon.THIS_WEEK),
+        later = keep(later, horizon >= AgendaHorizon.EVERYTHING),
+    )
 }
 
 /**
@@ -127,8 +156,8 @@ data class WidgetAgenda(
 
 fun widgetAgenda(
     sections: AgendaSections,
-    horizon: WidgetHorizon,
-    sort: WidgetSort = WidgetSort.DATE,
+    horizon: AgendaHorizon,
+    sort: AgendaSort = AgendaSort.DATE,
     limit: Int = WIDGET_MAX_ITEMS,
 ): WidgetAgenda {
     // Overdue is in every horizon: something already late is the last thing
@@ -136,9 +165,9 @@ fun widgetAgenda(
     val within = buildList {
         addAll(sections.overdue)
         addAll(sections.today)
-        if (horizon >= WidgetHorizon.TOMORROW) addAll(sections.tomorrow)
-        if (horizon >= WidgetHorizon.THIS_WEEK) addAll(sections.thisWeek)
-        if (horizon >= WidgetHorizon.EVERYTHING) addAll(sections.later)
+        if (horizon >= AgendaHorizon.TOMORROW) addAll(sections.tomorrow)
+        if (horizon >= AgendaHorizon.THIS_WEEK) addAll(sections.thisWeek)
+        if (horizon >= AgendaHorizon.EVERYTHING) addAll(sections.later)
     }
     if (within.isNotEmpty()) {
         // Sorted across buckets rather than within them: the widget shows one
@@ -148,9 +177,9 @@ fun widgetAgenda(
     }
 
     val beyond = buildList {
-        if (horizon < WidgetHorizon.TOMORROW) addAll(sections.tomorrow)
-        if (horizon < WidgetHorizon.THIS_WEEK) addAll(sections.thisWeek)
-        if (horizon < WidgetHorizon.EVERYTHING) addAll(sections.later)
+        if (horizon < AgendaHorizon.TOMORROW) addAll(sections.tomorrow)
+        if (horizon < AgendaHorizon.THIS_WEEK) addAll(sections.thisWeek)
+        if (horizon < AgendaHorizon.EVERYTHING) addAll(sections.later)
     }
     return WidgetAgenda(beyond.sortedWith(sort.comparator()).take(limit), showingUpcoming = true)
 }

@@ -5,8 +5,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.boxleits.vikunjaandroid.core.agenda.WidgetHorizon
-import com.boxleits.vikunjaandroid.core.agenda.WidgetSort
+import com.boxleits.vikunjaandroid.core.agenda.AgendaHorizon
+import com.boxleits.vikunjaandroid.core.agenda.AgendaSort
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -36,24 +36,24 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         prefs[KEY_LAST_SYNCED_AT_EPOCH_MS]?.let { Instant.fromEpochMilliseconds(it) }
     }
 
-    val widgetSettingsFlow: Flow<WidgetSettings> = dataStore.data.map { prefs ->
-        WidgetSettings(
+    val agendaSettingsFlow: Flow<AgendaSettings> = dataStore.data.map { prefs ->
+        AgendaSettings(
             // An unknown stored name (a downgrade, a renamed constant) falls
             // back to the default rather than crashing the widget.
             horizon = prefs[KEY_WIDGET_HORIZON]
-                ?.let { name -> WidgetHorizon.entries.firstOrNull { it.name == name } }
-                ?: WidgetSettings.DEFAULT.horizon,
+                ?.let { name -> AgendaHorizon.entries.firstOrNull { it.name == name } }
+                ?: AgendaSettings.DEFAULT.horizon,
             sort = prefs[KEY_WIDGET_SORT]
-                ?.let { name -> WidgetSort.entries.firstOrNull { it.name == name } }
-                ?: WidgetSettings.DEFAULT.sort,
+                ?.let { name -> AgendaSort.entries.firstOrNull { it.name == name } }
+                ?: AgendaSettings.DEFAULT.sort,
         )
     }
 
-    suspend fun setWidgetHorizon(horizon: WidgetHorizon) {
+    suspend fun setAgendaHorizon(horizon: AgendaHorizon) {
         dataStore.edit { prefs -> prefs[KEY_WIDGET_HORIZON] = horizon.name }
     }
 
-    suspend fun setWidgetSort(sort: WidgetSort) {
+    suspend fun setAgendaSort(sort: AgendaSort) {
         dataStore.edit { prefs -> prefs[KEY_WIDGET_SORT] = sort.name }
     }
 
@@ -76,6 +76,9 @@ class SettingsRepository @Inject constructor(@ApplicationContext context: Contex
         val KEY_BASE_URL = stringPreferencesKey("base_url")
         val KEY_API_TOKEN = stringPreferencesKey("api_token")
         val KEY_LAST_SYNCED_AT_EPOCH_MS = longPreferencesKey("last_synced_at_epoch_ms")
+        // Key names keep saying "widget" so settings already on a device
+        // survive: they now govern the Agenda screen too, but renaming the
+        // key would silently reset everyone to the defaults.
         val KEY_WIDGET_HORIZON = stringPreferencesKey("widget_horizon")
         val KEY_WIDGET_SORT = stringPreferencesKey("widget_sort")
     }

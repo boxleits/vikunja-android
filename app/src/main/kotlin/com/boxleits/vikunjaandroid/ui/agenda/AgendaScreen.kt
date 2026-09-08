@@ -70,7 +70,7 @@ fun AgendaScreen(
             if (agenda.isEmpty) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = "Nothing scheduled or due.",
+                        text = "Nothing due in the selected range. Widen it in Settings \u2192 Agenda.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

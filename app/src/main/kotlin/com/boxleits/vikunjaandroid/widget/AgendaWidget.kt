@@ -3,6 +3,8 @@ package com.boxleits.vikunjaandroid.widget
 import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
@@ -29,9 +31,8 @@ import com.boxleits.vikunjaandroid.core.agenda.AgendaBucket
 import com.boxleits.vikunjaandroid.core.agenda.AgendaItem
 import com.boxleits.vikunjaandroid.core.agenda.AgendaSections
 import com.boxleits.vikunjaandroid.core.agenda.widgetAgenda
-import com.boxleits.vikunjaandroid.data.settings.WidgetSettings
+import com.boxleits.vikunjaandroid.data.settings.AgendaSettings
 import dagger.hilt.android.EntryPointAccessors
-import kotlinx.coroutines.flow.first
 import java.time.Instant as JavaInstant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -39,14 +40,33 @@ import java.time.format.FormatStyle
 
 class AgendaWidget : GlanceAppWidget() {
 
+    /**
+     * Data is collected *inside* provideContent, not read once before it.
+     *
+     * That distinction is the whole bug this fixes. provideContent starts a
+     * session that stays alive; a later update() recomposes that existing
+     * session rather than re-running provideGlance. Values captured before
+     * provideContent are therefore frozen for the session's lifetime, so
+     * changing a setting redrew the widget with the settings it had when the
+     * session began — which looked like the widget ignoring the change. It
+     * also explains a widget stuck on "Nothing scheduled" when its session
+     * happened to start before the first sync.
+     *
+     * Collecting the flows in the composition makes the widget follow the
+     * database and the settings on its own, so it is correct even when nobody
+     * remembers to ask it to redraw.
+     */
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val entryPoint = entryPoint(context)
-        val agenda = entryPoint.taskQueryRepository().observeAgenda().first()
-        val settings = entryPoint.settingsRepository().widgetSettingsFlow.first()
+        val agendaFlow = entryPoint.taskQueryRepository().observeAgenda()
+        val settingsFlow = entryPoint.settingsRepository().agendaSettingsFlow
 
         val openApp = Intent(context, MainActivity::class.java)
 
         provideContent {
+            val agenda by agendaFlow.collectAsState(initial = AgendaSections.EMPTY)
+            val settings by settingsFlow.collectAsState(initial = AgendaSettings.DEFAULT)
+
             GlanceTheme {
                 AgendaWidgetContent(agenda, settings, openApp)
             }
@@ -60,7 +80,7 @@ class AgendaWidget : GlanceAppWidget() {
 @Composable
 private fun AgendaWidgetContent(
     agenda: AgendaSections,
-    settings: WidgetSettings,
+    settings: AgendaSettings,
     openAppIntent: Intent,
 ) {
     val widget = widgetAgenda(agenda, settings.horizon, settings.sort)

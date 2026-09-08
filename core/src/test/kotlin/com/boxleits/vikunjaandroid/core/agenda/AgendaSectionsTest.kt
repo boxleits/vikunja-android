@@ -87,13 +87,13 @@ class AgendaSectionsTest {
     fun `each horizon includes exactly its buckets`() {
         val agenda = buildAgenda(spreadOfTasks(), today, timeZone)
 
-        fun idsFor(horizon: WidgetHorizon) =
+        fun idsFor(horizon: AgendaHorizon) =
             widgetAgenda(agenda, horizon, limit = 10).items.map { it.task.id }
 
-        assertThat(idsFor(WidgetHorizon.TODAY)).containsExactly(1L, 2L)
-        assertThat(idsFor(WidgetHorizon.TOMORROW)).containsExactly(1L, 2L, 3L)
-        assertThat(idsFor(WidgetHorizon.THIS_WEEK)).containsExactly(1L, 2L, 3L, 4L)
-        assertThat(idsFor(WidgetHorizon.EVERYTHING)).containsExactly(1L, 2L, 3L, 4L, 5L)
+        assertThat(idsFor(AgendaHorizon.TODAY)).containsExactly(1L, 2L)
+        assertThat(idsFor(AgendaHorizon.TOMORROW)).containsExactly(1L, 2L, 3L)
+        assertThat(idsFor(AgendaHorizon.THIS_WEEK)).containsExactly(1L, 2L, 3L, 4L)
+        assertThat(idsFor(AgendaHorizon.EVERYTHING)).containsExactly(1L, 2L, 3L, 4L, 5L)
     }
 
     @Test
@@ -101,7 +101,7 @@ class AgendaSectionsTest {
         val tasks = listOf(sampleTask(id = 1, dueDate = instantFor(LocalDate(2024, 1, 5))))
         val agenda = buildAgenda(tasks, today, timeZone)
 
-        WidgetHorizon.entries.forEach { horizon ->
+        AgendaHorizon.entries.forEach { horizon ->
             val widget = widgetAgenda(agenda, horizon, limit = 10)
             assertThat(widget.items.map { it.task.id }).containsExactly(1L)
             assertThat(widget.showingUpcoming).isFalse()
@@ -115,7 +115,7 @@ class AgendaSectionsTest {
             sampleTask(id = 5, title = "Later", dueDate = instantFor(LocalDate(2024, 3, 1))),
         )
 
-        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), WidgetHorizon.TODAY, limit = 8)
+        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), AgendaHorizon.TODAY, limit = 8)
 
         assertThat(widget.items.map { it.task.id }).containsExactly(4L, 5L).inOrder()
         assertThat(widget.showingUpcoming).isTrue()
@@ -125,7 +125,7 @@ class AgendaSectionsTest {
     fun `the widest horizon has nothing to fall back to`() {
         val widget = widgetAgenda(
             buildAgenda(spreadOfTasks(), today, timeZone),
-            WidgetHorizon.EVERYTHING,
+            AgendaHorizon.EVERYTHING,
             limit = 10,
         )
 
@@ -136,7 +136,7 @@ class AgendaSectionsTest {
     fun `widget respects the item limit`() {
         val tasks = (1L..10L).map { sampleTask(id = it, dueDate = instantFor(today)) }
 
-        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), WidgetHorizon.TODAY, limit = 3)
+        val widget = widgetAgenda(buildAgenda(tasks, today, timeZone), AgendaHorizon.TODAY, limit = 3)
 
         assertThat(widget.items).hasSize(3)
     }
@@ -145,7 +145,7 @@ class AgendaSectionsTest {
     fun `widget is empty when there is nothing dated at all`() {
         val agenda = buildAgenda(listOf(sampleTask(id = 1)), today, timeZone)
 
-        val widget = widgetAgenda(agenda, WidgetHorizon.TOMORROW, limit = 8)
+        val widget = widgetAgenda(agenda, AgendaHorizon.TOMORROW, limit = 8)
 
         assertThat(widget.items).isEmpty()
     }
@@ -173,8 +173,8 @@ class AgendaSectionsTest {
 
         val widget = widgetAgenda(
             buildAgenda(tasks, today, timeZone),
-            WidgetHorizon.EVERYTHING,
-            sort = WidgetSort.DATE,
+            AgendaHorizon.EVERYTHING,
+            sort = AgendaSort.DATE,
         )
 
         assertThat(widget.items.map { it.task.id }).containsExactly(2L, 3L, 1L).inOrder()
@@ -194,8 +194,8 @@ class AgendaSectionsTest {
 
         val widget = widgetAgenda(
             buildAgenda(tasks, today, timeZone),
-            WidgetHorizon.EVERYTHING,
-            sort = WidgetSort.PRIORITY,
+            AgendaHorizon.EVERYTHING,
+            sort = AgendaSort.PRIORITY,
         )
 
         assertThat(widget.items.map { it.task.id }).containsExactly(2L, 1L).inOrder()
@@ -210,8 +210,8 @@ class AgendaSectionsTest {
 
         val widget = widgetAgenda(
             buildAgenda(tasks, today, timeZone),
-            WidgetHorizon.EVERYTHING,
-            sort = WidgetSort.TITLE,
+            AgendaHorizon.EVERYTHING,
+            sort = AgendaSort.TITLE,
         )
 
         assertThat(widget.items.map { it.task.id }).containsExactly(2L, 1L).inOrder()
@@ -228,12 +228,47 @@ class AgendaSectionsTest {
 
         val widget = widgetAgenda(
             buildAgenda(tasks, today, timeZone),
-            WidgetHorizon.TODAY,
-            sort = WidgetSort.TITLE,
+            AgendaHorizon.TODAY,
+            sort = AgendaSort.TITLE,
         )
 
         assertThat(widget.showingUpcoming).isTrue()
         assertThat(widget.items.map { it.task.id }).containsExactly(2L, 1L).inOrder()
+    }
+
+
+    @Test
+    fun `limitedTo keeps overdue and today in every horizon`() {
+        val agenda = buildAgenda(spreadOfTasks(), today, timeZone)
+
+        AgendaHorizon.entries.forEach { horizon ->
+            val limited = agenda.limitedTo(horizon, AgendaSort.DATE)
+            assertThat(limited.overdue.map { it.task.id }).containsExactly(1L)
+            assertThat(limited.today.map { it.task.id }).containsExactly(2L)
+        }
+    }
+
+    @Test
+    fun `limitedTo empties the sections beyond the horizon`() {
+        val agenda = buildAgenda(spreadOfTasks(), today, timeZone).limitedTo(AgendaHorizon.TOMORROW, AgendaSort.DATE)
+
+        assertThat(agenda.tomorrow.map { it.task.id }).containsExactly(3L)
+        assertThat(agenda.thisWeek).isEmpty()
+        assertThat(agenda.later).isEmpty()
+    }
+
+    @Test
+    fun `limitedTo re-sorts each section`() {
+        val tasks = listOf(
+            sampleTask(id = 1, title = "zulu", dueDate = instantFor(today), priority = Priority.URGENT),
+            sampleTask(id = 2, title = "alpha", dueDate = instantFor(today), priority = Priority.LOW),
+        )
+
+        val byTitle = buildAgenda(tasks, today, timeZone).limitedTo(AgendaHorizon.TODAY, AgendaSort.TITLE)
+        assertThat(byTitle.today.map { it.task.id }).containsExactly(2L, 1L).inOrder()
+
+        val byPriority = buildAgenda(tasks, today, timeZone).limitedTo(AgendaHorizon.TODAY, AgendaSort.PRIORITY)
+        assertThat(byPriority.today.map { it.task.id }).containsExactly(1L, 2L).inOrder()
     }
 
 }
