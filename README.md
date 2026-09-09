@@ -340,6 +340,20 @@ right model once there is something like a saved search to point at; until
 then, an explicit order setting is the honest substitute. There is no item
 limit in either — the list scrolls.
 
+## Design notes
+
+Two studies written before building, in `docs/`:
+
+- [`docs/task-attributes.md`](docs/task-attributes.md) — the task description
+  (it is TipTap HTML, images sit behind an authenticated endpoint, and the server
+  does not sanitise it), plus every remaining Vikunja task attribute with a route,
+  an effort estimate and a verdict.
+- [`docs/notifications.md`](docs/notifications.md) — reminders close to Orgzly's
+  behaviour, read out of Orgzly's own source, mapped onto Vikunja's explicit
+  `reminders[]` array and onto what Android actually permits.
+
+Both are proposals, not descriptions of what exists.
+
 ## Roadmap
 
 Roughly in order:
