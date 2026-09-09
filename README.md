@@ -152,7 +152,7 @@ elsewhere.
 
 ### Conflicts
 
-**The server wins, and the user is told.**
+**The server keeps the task; this device's version becomes a `[conflict]` copy.**
 
 Vikunja has nothing to build on server-side: tasks carry no version or ETag,
 and the update endpoint has no `If-Match`, so it will always accept a stale
@@ -167,7 +167,7 @@ costs no extra request:
 | At flush time | Result |
 |---|---|
 | Server's `updated` matches the recorded one | The write goes ahead |
-| It differs | **No POST is sent.** The edit is dropped, the server's version replaces the local row, and a notice is stored |
+| It differs | **No POST is sent.** The server's version takes the task back, and this device's version becomes a `[conflict]` task of its own |
 | No recorded base (an edit made against a task this device created, or one queued by an older build) | Check skipped — nothing to conflict with, or can't tell |
 
 The comparison is made to **whole seconds**, which is not a tolerance but the
@@ -180,18 +180,56 @@ this device's own successful write look like somebody else's change — which is
 how a task created offline, edited offline, and then synced came back as a
 conflict with itself.
 
-The local edit is discarded rather than merged, and keeping the local value
-quietly is exactly the silent overwrite the check exists to prevent. That was
-an easy trade while only `done` was editable — a boolean has nothing to merge.
-Now that titles and dates are editable it is a real cost: a rejected edit
-throws away something the user typed, and the notice names the task but not
-what was lost. Keeping the losing version is on the roadmap.
+#### Nothing is discarded: the losing version becomes a task
+
+Borrowed from Syncthing, which never resolves a conflict by throwing a version
+away — it keeps both and renames one. Here the version that loses is created as
+a new task, prefixed `[conflict] `, carrying the native Vikunja label
+`sync-conflict` and a `copiedfrom` relation pointing at the original. Because
+it lands on the server, the web UI and every other client see the conflict too,
+rather than it being a notice on one phone.
+
+**One rule, no field inspection:** if the `updated` stamp differs, a copy is
+made. That is deliberate. An earlier design merged field by field — apply the
+local title if nobody else touched the title, and so on — which fails on the
+first example anyone tries:
+
+```
+Base:    "Buy milk"        ☐
+Phone:   "Buy milk"        ☑   (bought, offline)
+Server:  "Buy oat milk"    ☐   (somebody changed the plan)
+```
+
+Merging those fields gives "Buy oat milk ☑" — oat milk was bought, which
+nobody claimed. `done` is not a column, it is an assertion *about the title*,
+and renaming the task pulls the ground out from under it. Fields are not
+independent, so a rule that treats them as independent produces statements
+nobody made.
+
+Field-dependent rules also age badly: every new attribute multiplies the
+combinations to reason about, and behaviour that differs per field is
+unpredictable for exactly the sort of user who runs a self-hosted Vikunja. So
+the rule stays one sentence long, and the semantic judgement — is this the same
+errand or a different one? — goes to the person who can actually make it.
+
+**Which side loses is structural, not chronological.** The version that has not
+reached the server yet becomes the copy. No clock comparison: the server's
+stamp and this device's are two different clocks, and making the outcome depend
+on them agreeing would be a real fragility bought for a cosmetic decision —
+both versions survive either way. It is also one write instead of two, and it
+never rewrites a task somebody else is looking at.
+
+**What can still fail:** the copy is queued, and dropping the edit that lost
+happens in the same transaction, so this device's version never exists nowhere.
+The label and the relation are best-effort afterwards and are not retried — a
+copy without its label is still a task titled `[conflict] …`, which is
+recoverable; a copy that was never created would not be.
 
 Notices are stored in the database, not raised in the moment: the flush that
 finds a conflict usually runs in a background worker with no UI attached, so
 the news has to wait until the app is next opened. It then appears as a dialog
-naming the affected tasks — a dialog rather than a snackbar, because a change
-of the user's was thrown away and a message that vanishes on its own is the
+naming the affected tasks — a dialog rather than a snackbar, because the user
+has a decision to make about two tasks and a message that vanishes on its own is the
 wrong way to say so.
 
 Repeated toggles of one task collapse into a single queued edit, and the
@@ -350,10 +388,6 @@ Roughly in order:
    rewrite the reference once the real id arrives.
 2. More editing: labels, description and start dates. Title, priority and due
    date are in — tap a heading in the outline or a row in the agenda.
-3. Keeping the losing version of a conflict. Detection is in and "server wins"
-   is honest about itself (see [Conflicts](#conflicts)), but now that text is
-   editable, a rejected edit throws away something the user typed, and that
-   deserves better than a notice.
+3. Notifications for due tasks, and swipe gestures for state and priority.
 4. Quick-capture from outside the app — a share target and a widget button.
-4. Swipe gestures for state/priority changes, notifications for due tasks.
-6. Encrypted token storage.
+5. Encrypted token storage.

@@ -39,7 +39,8 @@ class OutlineViewModel @Inject constructor(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     /**
-     * Changes that were undone because the server had a newer version. Read
+     * Tasks that changed on the server mid-edit, whose local version was kept
+     * as a separate `[conflict]` task. Read
      * from the database rather than kept in memory: the flush that finds a
      * conflict often runs in a background worker, so the news has to survive
      * until the user actually opens the app.

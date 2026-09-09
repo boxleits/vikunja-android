@@ -54,6 +54,12 @@ data class PendingEditEntity(
     val title: String? = null,
     /** CREATE_TASK only: where to create it. */
     val projectId: Long? = null,
+    /**
+     * CREATE_TASK only: set when this creation is a conflict copy, naming the
+     * task it was copied from. Drives the label and the `copiedfrom` relation
+     * once the server has given the copy an id of its own.
+     */
+    val conflictOfTaskId: Long? = null,
     /** UPDATE_TASK only: the new values, and what to put back if the write is refused. */
     val priority: Int? = null,
     val dueDateEpochMs: Long? = null,
@@ -77,7 +83,9 @@ data class PendingEditEntity(
  *
  * Both the create path and a sync need it: the create path to show the task at
  * once, and a sync to put it back after the wholesale replace, which would
- * otherwise delete a task the server has never heard of.
+ * otherwise delete a task the server has never heard of. It carries the edit's
+ * own fields rather than blanks, because a conflict copy is a creation whose
+ * whole point is the values it holds.
  */
 fun PendingEditEntity.toPlaceholderTask(): TaskEntity = TaskEntity(
     id = taskId,
@@ -85,13 +93,50 @@ fun PendingEditEntity.toPlaceholderTask(): TaskEntity = TaskEntity(
     parentTaskId = null,
     title = title.orEmpty(),
     description = null,
-    done = false,
-    doneAtEpochMs = null,
-    priority = 0,
-    dueDateEpochMs = null,
+    done = done,
+    doneAtEpochMs = if (done) createdAtEpochMs else null,
+    priority = priority ?: 0,
+    dueDateEpochMs = dueDateEpochMs,
     startDateEpochMs = null,
     endDateEpochMs = null,
     position = 0.0,
     // No server version: it has never been to the server.
     updatedAtEpochMs = null,
 )
+
+/** The task as it stood on this device, for a conflict copy to preserve. */
+data class LosingVersion(
+    val title: String,
+    val done: Boolean,
+    val priority: Int,
+    val dueDateEpochMs: Long?,
+)
+
+/**
+ * Reconstructs what this edit would have produced: the state the task was in
+ * when the edit was made, with the edit's own change on top.
+ *
+ * Deliberately built from the recorded base rather than from the local row.
+ * The two are usually the same, but not after a sync has run since the edit
+ * was made: the wholesale replace writes the server's values and the re-apply
+ * only puts back what the edit itself asserts, so the row can end up carrying
+ * the *server's* title under this device's tick. A copy built from that would
+ * claim someone ticked off a task by a name they never saw — which is the
+ * whole failure a conflict copy exists to avoid.
+ */
+fun PendingEditEntity.losingVersion(): LosingVersion = when (type) {
+    EDIT_TYPE_UPDATE_TASK -> LosingVersion(
+        title = title.orEmpty(),
+        // An edit of the fields says nothing about done, so the base stands.
+        done = previousDone,
+        priority = priority ?: 0,
+        dueDateEpochMs = dueDateEpochMs,
+    )
+
+    else -> LosingVersion(
+        title = previousTitle.orEmpty(),
+        done = done,
+        priority = previousPriority ?: 0,
+        dueDateEpochMs = previousDueDateEpochMs,
+    )
+}
