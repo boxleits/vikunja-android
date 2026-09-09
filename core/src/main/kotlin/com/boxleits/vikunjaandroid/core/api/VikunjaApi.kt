@@ -71,6 +71,23 @@ interface VikunjaApi {
     @PUT("api/v1/tasks/{task}/relations")
     suspend fun createRelation(@Path("task") taskId: Long, @Body relation: JsonObject): Response<JsonObject>
 
+    /**
+     * Creates a label. Same PUT-to-create convention as tasks.
+     *
+     * Used to mint the `sync-conflict` label the first time a conflict copy
+     * needs one; labels belong to the user who created them, so this is the
+     * user's own label rather than something shared.
+     */
+    @PUT("api/v1/labels")
+    suspend fun createLabel(@Body label: JsonObject): Response<LabelDto>
+
+    /**
+     * Puts a label on a task. The body carries only `label_id` — the task
+     * comes from the path.
+     */
+    @PUT("api/v1/tasks/{task}/labels")
+    suspend fun addLabelToTask(@Path("task") taskId: Long, @Body label: JsonObject): Response<JsonObject>
+
     companion object {
         const val DEFAULT_PAGE_SIZE = 50
         const val PAGINATION_TOTAL_PAGES_HEADER = "x-pagination-total-pages"

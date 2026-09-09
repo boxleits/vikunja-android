@@ -1,6 +1,7 @@
 package com.boxleits.vikunjaandroid.core.repository
 
 import com.boxleits.vikunjaandroid.core.api.VikunjaApiClient
+import com.boxleits.vikunjaandroid.core.api.dto.RELATION_KIND_COPIED_FROM
 import com.boxleits.vikunjaandroid.core.model.Priority
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
@@ -407,6 +408,82 @@ class RemoteVikunjaRepositoryTest {
         assertThat(result).isInstanceOf(TaskWriteResult.Conflict::class.java)
         assertThat((result as TaskWriteResult.Conflict).serverTask.title).isEqualTo("Renamed elsewhere")
         assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `createTask sends only a title for a plain capture`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"id":9,"project_id":1,"title":"Milk"}"""))
+
+        repository.createTask(projectId = 1, title = "Milk")
+
+        val request = server.takeRequest()
+        assertThat(request.method).isEqualTo("PUT")
+        assertThat(request.path).isEqualTo("/api/v1/projects/1/tasks")
+        val sent = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        // Anything the server would default to anyway stays off the wire, so a
+        // quick capture is not carrying a conflict copy's baggage.
+        assertThat(sent.keys).containsExactly("title")
+    }
+
+    @Test
+    fun `createTask carries done, priority and due date when a copy needs them`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"id":9,"project_id":1,"title":"Milk"}"""))
+
+        repository.createTask(
+            projectId = 1,
+            title = "Milk",
+            done = true,
+            priority = Priority.HIGH,
+            dueDate = Instant.parse("2024-02-01T09:30:00Z"),
+        )
+
+        val sent = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertThat(sent["title"]!!.jsonPrimitive.content).isEqualTo("Milk")
+        assertThat(sent["done"]!!.jsonPrimitive.boolean).isTrue()
+        assertThat(sent["priority"]!!.jsonPrimitive.int).isEqualTo(3)
+        assertThat(sent["due_date"]!!.jsonPrimitive.content).isEqualTo("2024-02-01T09:30:00Z")
+    }
+
+    @Test
+    fun `relateTask points the copy at its original and lets Vikunja add the inverse`() = runTest {
+        server.enqueue(MockResponse().setBody("{}"))
+
+        repository.relateTask(taskId = 9, otherTaskId = 7, kind = RELATION_KIND_COPIED_FROM)
+
+        val request = server.takeRequest()
+        assertThat(request.method).isEqualTo("PUT")
+        assertThat(request.path).isEqualTo("/api/v1/tasks/9/relations")
+        val sent = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertThat(sent["other_task_id"]!!.jsonPrimitive.long).isEqualTo(7L)
+        assertThat(sent["relation_kind"]!!.jsonPrimitive.content).isEqualTo("copiedfrom")
+        // Only the forward direction: Vikunja writes the copiedto side itself,
+        // so sending it too would be a second, redundant relation.
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `createLabel and addLabelToTask use the routes and payloads Vikunja expects`() = runTest {
+        server.enqueue(MockResponse().setBody("""{"id":4,"title":"sync-conflict","hex_color":"e8412c"}"""))
+        server.enqueue(MockResponse().setBody("{}"))
+
+        val label = repository.createLabel(title = "sync-conflict", hexColor = "e8412c")
+        repository.addLabelToTask(taskId = 9, labelId = label.id)
+
+        val createRequest = server.takeRequest()
+        assertThat(createRequest.method).isEqualTo("PUT")
+        assertThat(createRequest.path).isEqualTo("/api/v1/labels")
+        val createBody = Json.parseToJsonElement(createRequest.body.readUtf8()).jsonObject
+        assertThat(createBody["title"]!!.jsonPrimitive.content).isEqualTo("sync-conflict")
+        assertThat(createBody["hex_color"]!!.jsonPrimitive.content).isEqualTo("e8412c")
+        assertThat(label.id).isEqualTo(4L)
+
+        val attachRequest = server.takeRequest()
+        assertThat(attachRequest.method).isEqualTo("PUT")
+        assertThat(attachRequest.path).isEqualTo("/api/v1/tasks/9/labels")
+        val attachBody = Json.parseToJsonElement(attachRequest.body.readUtf8()).jsonObject
+        // The task is in the path; only the label id belongs in the body.
+        assertThat(attachBody.keys).containsExactly("label_id")
+        assertThat(attachBody["label_id"]!!.jsonPrimitive.long).isEqualTo(4L)
     }
 
     @Test
