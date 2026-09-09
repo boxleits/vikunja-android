@@ -342,8 +342,14 @@ limit in either — the list scrolls.
 
 ## Design notes
 
-Two studies written before building, in `docs/`:
+Studies written before building, in `docs/`:
 
+- [`docs/orgzly-parity.md`](docs/orgzly-parity.md) — a feature-by-feature survey
+  of what Orgzly does, what Vikunja does differently, and which of the two to
+  follow in each case.
+- [`docs/saved-searches.md`](docs/saved-searches.md) — Orgzly's query language
+  against Vikunja's server-side filters, and the home screen widget that should
+  be pointed at them.
 - [`docs/task-attributes.md`](docs/task-attributes.md) — the task description
   (it is TipTap HTML, images sit behind an authenticated endpoint, and the server
   does not sanitise it), plus every remaining Vikunja task attribute with a route,
@@ -352,7 +358,10 @@ Two studies written before building, in `docs/`:
   behaviour, read out of Orgzly's own source, mapped onto Vikunja's explicit
   `reminders[]` array and onto what Android actually permits.
 
-Both are proposals, not descriptions of what exists.
+They are proposals, not descriptions of what exists. Two of them turned up
+things that are wrong today: nothing in the app can delete a task, and saved
+filters arrive from `GET /projects` as pseudo-projects with negative ids, which
+the app currently stores and offers as real projects.
 
 ## Roadmap
 
