@@ -1,6 +1,9 @@
 package com.boxleits.vikunjaandroid.data.sync
 
+import com.boxleits.vikunjaandroid.core.model.Priority
+import com.boxleits.vikunjaandroid.core.model.Task
 import com.boxleits.vikunjaandroid.core.repository.RemoteVikunjaRepository
+import com.boxleits.vikunjaandroid.core.repository.TaskEdits
 import com.boxleits.vikunjaandroid.core.repository.TaskWriteResult
 import com.boxleits.vikunjaandroid.core.repository.VikunjaSyncException
 import com.boxleits.vikunjaandroid.core.repository.isRetryable
@@ -8,6 +11,7 @@ import com.boxleits.vikunjaandroid.data.local.AppDatabase
 import com.boxleits.vikunjaandroid.data.local.entity.ConflictNoticeEntity
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_CREATE_TASK
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_SET_DONE
+import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_UPDATE_TASK
 import com.boxleits.vikunjaandroid.data.local.entity.PendingEditEntity
 import com.boxleits.vikunjaandroid.data.local.entity.toEntity
 import com.boxleits.vikunjaandroid.data.local.entity.toPlaceholderTask
@@ -157,19 +161,73 @@ class TaskEditRepository @Inject constructor(
     }
 
     /**
+     * Changes a task's title, priority and due date, locally first.
+     *
+     * The whole form is written, not only the fields the user touched. That is
+     * safe because the push round-trips the server's own copy of the task: the
+     * fields this app doesn't show are carried over from it rather than
+     * overwritten with blanks.
+     */
+    suspend fun updateTask(taskId: Long, edits: TaskEdits): EditResult {
+        val trimmed = edits.title.trim()
+        if (trimmed.isEmpty()) return EditResult.Rejected("A task needs a title.")
+
+        val taskDao = database.taskDao()
+        val pendingDao = database.pendingEditDao()
+
+        val before = taskDao.findById(taskId)
+            ?: return EditResult.Rejected("That task is no longer in the local copy — try syncing.")
+
+        // As with a tick: if an edit of this kind is already queued, the row on
+        // screen has already diverged, so the state to return to on a rejection
+        // is the one from before that first edit, not the intermediate one.
+        val queued = pendingDao.find(taskId, EDIT_TYPE_UPDATE_TASK)
+        val now = Clock.System.now()
+
+        taskDao.updateFields(
+            id = taskId,
+            title = trimmed,
+            priority = edits.priority.value,
+            dueDateEpochMs = edits.dueDate?.toEpochMilliseconds(),
+        )
+        pendingDao.upsert(
+            PendingEditEntity(
+                taskId = taskId,
+                type = EDIT_TYPE_UPDATE_TASK,
+                done = before.done,
+                previousDone = before.done,
+                previousDoneAtEpochMs = before.doneAtEpochMs,
+                title = trimmed,
+                priority = edits.priority.value,
+                dueDateEpochMs = edits.dueDate?.toEpochMilliseconds(),
+                previousTitle = queued?.previousTitle ?: before.title,
+                previousPriority = queued?.previousPriority ?: before.priority,
+                previousDueDateEpochMs = queued?.previousDueDateEpochMs ?: before.dueDateEpochMs,
+                baseUpdatedAtEpochMs = if (queued != null) queued.baseUpdatedAtEpochMs else before.updatedAtEpochMs,
+                createdAtEpochMs = now.toEpochMilliseconds(),
+            ),
+        )
+        widgetRefresher.refresh()
+
+        val result = flushPending().resultForCaller()
+        if (result is EditResult.Queued) syncScheduler.requestImmediateSync()
+        return result
+    }
+
+    /**
      * Pushes every queued edit. Safe to call repeatedly and from anywhere —
      * after a sync, from the worker, or straight after an edit.
      */
     suspend fun flushPending(): FlushOutcome {
         val pendingDao = database.pendingEditDao()
         val taskDao = database.taskDao()
-        val queued = pendingDao.getAll()
-        if (queued.isEmpty()) return FlushOutcome(pushed = 0, stillQueued = 0, rejected = 0, conflicted = 0)
+        val queuedIds = pendingDao.getAll().map { it.id }
+        if (queuedIds.isEmpty()) return FlushOutcome(pushed = 0, stillQueued = 0, rejected = 0, conflicted = 0)
 
         val api = apiProvider.getApi()
             ?: return FlushOutcome(
                 pushed = 0,
-                stillQueued = queued.size,
+                stillQueued = queuedIds.size,
                 rejected = 0,
                 conflicted = 0,
                 message = "Not connected to a Vikunja instance.",
@@ -182,60 +240,117 @@ class TaskEditRepository @Inject constructor(
         var conflicted = 0
         var message: String? = null
 
-        for (edit in queued) {
-            try {
-                if (edit.type == EDIT_TYPE_CREATE_TASK) {
-                    val created = remote.createTask(
-                        projectId = requireNotNull(edit.projectId) { "a queued create must know its project" },
-                        title = requireNotNull(edit.title) { "a queued create must know its title" },
-                    )
-                    database.withTransaction {
-                        // The placeholder is replaced rather than updated: its
-                        // id is the primary key, and the server's id is a
-                        // different row as far as the database is concerned.
-                        taskDao.deleteById(edit.taskId)
-                        taskDao.upsert(created.toEntity())
-                        pendingDao.deleteById(edit.id)
-                    }
-                    pushed++
-                    continue
-                }
+        for (editId in queuedIds) {
+            // Re-read rather than trusting the snapshot: pushing an earlier
+            // edit can have rewritten this one — a create gives its task a real
+            // id, and a successful write moves the base version the next edit
+            // for that task has to be checked against.
+            val edit = pendingDao.findById(editId) ?: continue
 
-                val outcome = remote.setTaskDone(
-                    taskId = edit.taskId,
-                    done = edit.done,
-                    expectedUpdatedAt = edit.baseUpdatedAtEpochMs?.let { Instant.fromEpochMilliseconds(it) },
-                )
-                when (outcome) {
-                    is TaskWriteResult.Applied -> {
-                        val saved = outcome.task
-                        taskDao.updateDoneAndVersion(
-                            id = saved.id,
-                            done = saved.done,
-                            doneAtEpochMs = saved.doneAt?.toEpochMilliseconds(),
-                            updatedAtEpochMs = saved.updatedAt?.toEpochMilliseconds(),
+            try {
+                when (edit.type) {
+                    EDIT_TYPE_CREATE_TASK -> {
+                        val created = remote.createTask(
+                            projectId = requireNotNull(edit.projectId) { "a queued create must know its project" },
+                            title = requireNotNull(edit.title) { "a queued create must know its title" },
                         )
-                        pendingDao.deleteById(edit.id)
+                        database.withTransaction {
+                            // The placeholder is replaced rather than updated:
+                            // its id is the primary key, and the server's id is
+                            // a different row as far as the database is
+                            // concerned.
+                            taskDao.deleteById(edit.taskId)
+                            taskDao.upsert(created.toEntity())
+                            pendingDao.deleteById(edit.id)
+                            // Anything else queued against the placeholder — an
+                            // edit made before the create had been sent — now
+                            // has a real task to name.
+                            //
+                            // With no base version: an edit made against a
+                            // placeholder was never made against a server
+                            // version, so there is nothing for it to conflict
+                            // with. Adopting the stamp from this create instead
+                            // would claim the user edited a version they never
+                            // saw, and the task is seconds old and known only
+                            // to this device — nobody else can have touched it.
+                            pendingDao.remapTaskId(
+                                oldTaskId = edit.taskId,
+                                newTaskId = created.id,
+                                updatedAtEpochMs = null,
+                            )
+                        }
                         pushed++
                     }
 
-                    is TaskWriteResult.Conflict -> {
-                        // The server's version wins whole, rather than the local
-                        // edit being merged into it: with one boolean at stake
-                        // there is nothing to merge, and quietly keeping the
-                        // local value would be the silent overwrite this whole
-                        // check exists to prevent.
-                        val server = outcome.serverTask
-                        taskDao.upsert(server.toEntity())
-                        database.conflictNoticeDao().upsert(
-                            ConflictNoticeEntity(
-                                taskId = server.id,
-                                taskTitle = server.title,
-                                detectedAtEpochMs = Clock.System.now().toEpochMilliseconds(),
+                    EDIT_TYPE_UPDATE_TASK -> {
+                        val outcome = remote.updateTask(
+                            taskId = edit.taskId,
+                            edits = TaskEdits(
+                                title = requireNotNull(edit.title) { "a queued edit must know its title" },
+                                priority = Priority.fromValue(edit.priority ?: 0),
+                                dueDate = edit.dueDateEpochMs?.let { Instant.fromEpochMilliseconds(it) },
                             ),
+                            expectedUpdatedAt = edit.baseUpdatedAtEpochMs?.let { Instant.fromEpochMilliseconds(it) },
                         )
-                        pendingDao.deleteById(edit.id)
-                        conflicted++
+                        when (outcome) {
+                            is TaskWriteResult.Applied -> {
+                                val saved = outcome.task
+                                database.withTransaction {
+                                    taskDao.updateFieldsAndVersion(
+                                        id = saved.id,
+                                        title = saved.title,
+                                        priority = saved.priority.value,
+                                        dueDateEpochMs = saved.dueDate?.toEpochMilliseconds(),
+                                        updatedAtEpochMs = saved.updatedAt?.toEpochMilliseconds(),
+                                    )
+                                    pendingDao.deleteById(edit.id)
+                                    pendingDao.rebaseOtherEdits(
+                                        taskId = saved.id,
+                                        exceptId = edit.id,
+                                        updatedAtEpochMs = saved.updatedAt?.toEpochMilliseconds(),
+                                    )
+                                }
+                                pushed++
+                            }
+
+                            is TaskWriteResult.Conflict -> {
+                                recordConflict(outcome.serverTask, edit.id)
+                                conflicted++
+                            }
+                        }
+                    }
+
+                    else -> {
+                        val outcome = remote.setTaskDone(
+                            taskId = edit.taskId,
+                            done = edit.done,
+                            expectedUpdatedAt = edit.baseUpdatedAtEpochMs?.let { Instant.fromEpochMilliseconds(it) },
+                        )
+                        when (outcome) {
+                            is TaskWriteResult.Applied -> {
+                                val saved = outcome.task
+                                database.withTransaction {
+                                    taskDao.updateDoneAndVersion(
+                                        id = saved.id,
+                                        done = saved.done,
+                                        doneAtEpochMs = saved.doneAt?.toEpochMilliseconds(),
+                                        updatedAtEpochMs = saved.updatedAt?.toEpochMilliseconds(),
+                                    )
+                                    pendingDao.deleteById(edit.id)
+                                    pendingDao.rebaseOtherEdits(
+                                        taskId = saved.id,
+                                        exceptId = edit.id,
+                                        updatedAtEpochMs = saved.updatedAt?.toEpochMilliseconds(),
+                                    )
+                                }
+                                pushed++
+                            }
+
+                            is TaskWriteResult.Conflict -> {
+                                recordConflict(outcome.serverTask, edit.id)
+                                conflicted++
+                            }
+                        }
                     }
                 }
             } catch (e: VikunjaSyncException) {
@@ -243,27 +358,42 @@ class TaskEditRepository @Inject constructor(
                 if (e.isRetryable()) {
                     pendingDao.recordFailedAttempt(edit.id, e.message)
                     stillQueued++
-                } else if (edit.type == EDIT_TYPE_CREATE_TASK) {
+                    continue
+                }
+
+                when (edit.type) {
                     // A create the server refuses has no earlier state to
                     // return to — the placeholder was never anything else, so
                     // it goes with the edit rather than lingering as a task
-                    // that will never exist.
-                    database.withTransaction {
+                    // that will never exist, and takes any edit made against it
+                    // along with it.
+                    EDIT_TYPE_CREATE_TASK -> database.withTransaction {
                         taskDao.deleteById(edit.taskId)
+                        pendingDao.deleteByTaskId(edit.taskId)
+                    }
+
+                    EDIT_TYPE_UPDATE_TASK -> database.withTransaction {
+                        taskDao.updateFields(
+                            id = edit.taskId,
+                            title = edit.previousTitle.orEmpty(),
+                            priority = edit.previousPriority ?: 0,
+                            dueDateEpochMs = edit.previousDueDateEpochMs,
+                        )
                         pendingDao.deleteById(edit.id)
                     }
-                    rejected++
-                } else {
+
                     // Never going to succeed: undo it locally so the user
                     // isn't left looking at a change that will never stick.
-                    taskDao.updateDone(
-                        id = edit.taskId,
-                        done = edit.previousDone,
-                        doneAtEpochMs = edit.previousDoneAtEpochMs,
-                    )
-                    pendingDao.deleteById(edit.id)
-                    rejected++
+                    else -> database.withTransaction {
+                        taskDao.updateDone(
+                            id = edit.taskId,
+                            done = edit.previousDone,
+                            doneAtEpochMs = edit.previousDoneAtEpochMs,
+                        )
+                        pendingDao.deleteById(edit.id)
+                    }
                 }
+                rejected++
             }
         }
 
@@ -274,6 +404,27 @@ class TaskEditRepository @Inject constructor(
         // re-triggering the sync that triggered it. Retries are arranged by
         // the caller that started the edit, plus the periodic sync.
         return FlushOutcome(pushed, stillQueued, rejected, conflicted, message)
+    }
+
+    /**
+     * Keeps the server's version whole and leaves a note saying so.
+     *
+     * The server wins outright rather than being merged with: the point of the
+     * version check is to stop a silent overwrite, and quietly keeping the
+     * local value would be exactly that.
+     */
+    private suspend fun recordConflict(serverTask: Task, editId: Long) {
+        database.withTransaction {
+            database.taskDao().upsert(serverTask.toEntity())
+            database.conflictNoticeDao().upsert(
+                ConflictNoticeEntity(
+                    taskId = serverTask.id,
+                    taskTitle = serverTask.title,
+                    detectedAtEpochMs = Clock.System.now().toEpochMilliseconds(),
+                ),
+            )
+            database.pendingEditDao().deleteById(editId)
+        }
     }
 }
 

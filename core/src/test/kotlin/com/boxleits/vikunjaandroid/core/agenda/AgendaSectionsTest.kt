@@ -271,4 +271,21 @@ class AgendaSectionsTest {
         assertThat(byPriority.today.map { it.task.id }).containsExactly(1L, 2L).inOrder()
     }
 
+
+    @Test
+    fun `all flattens the sections in the order they are shown`() {
+        val tasks = listOf(
+            sampleTask(id = 1, title = "Overdue", dueDate = instantFor(LocalDate(2024, 1, 5))),
+            sampleTask(id = 2, title = "Today", dueDate = instantFor(today)),
+            sampleTask(id = 3, title = "Tomorrow", dueDate = instantFor(LocalDate(2024, 1, 11))),
+            sampleTask(id = 4, title = "This week", dueDate = instantFor(LocalDate(2024, 1, 14))),
+            sampleTask(id = 5, title = "Later", dueDate = instantFor(LocalDate(2024, 2, 1))),
+        )
+
+        val agenda = buildAgenda(tasks, today, timeZone)
+
+        // The order matters: a screen looking a task up by id walks this list,
+        // and it has to match the order the sections are actually rendered in.
+        assertThat(agenda.all.map { it.task.id }).containsExactly(1L, 2L, 3L, 4L, 5L).inOrder()
+    }
 }

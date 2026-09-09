@@ -79,6 +79,16 @@ placeholders after the wholesale replace, which would otherwise delete a task
 the server has never heard of. A creation the server *refuses* takes its
 placeholder with it: there is no earlier state to roll back to.
 
+Editing a task — its title, priority or due date — goes through the same
+queue, and takes the whole form each time rather than only the fields that
+changed. That reads like it would clobber a concurrent change, but it can't:
+the push fetches the server's own copy of the task, merges the form into it,
+and posts that back, so description, labels, assignees and everything else this
+app doesn't show are carried over rather than blanked. Clearing a due date is
+the one field that has to be said out loud — an omitted `due_date` keeps the
+old value and Vikunja refuses `null` — so "no date" is written as the zero date
+`0001-01-01T00:00:00Z` that the reader already treats as unset.
+
 Writes go through a queue (`pending_edits`):
 
 1. The edit is applied to the local row, so the UI reacts at once.
@@ -94,14 +104,24 @@ What happens next depends on *why* a push failed, which
 | Offline, 5xx, 429, 401 | kept, retried later | keeps the edit |
 | 4xx (task gone, payload refused) | dropped | rolled back to the recorded previous value |
 
-Two details keep the queue and the wholesale replace from fighting:
+Three details keep the queue, the wholesale replace, and edits of different
+kinds from fighting:
 
 - A sync **re-applies queued edits** after replacing the tables, inside the
   same transaction, so the server snapshot can't undo a change that hasn't
   been sent.
-- A repeated toggle of the same task **collapses into one queued edit**
-  (unique index on task + kind), and the recorded "previous" value stays the
-  one from before the first edit, so a rollback lands where it should.
+- A repeated edit of the same kind to the same task **collapses into one
+  queued edit** (unique index on task + kind), and the recorded "previous"
+  value stays the one from before the first edit, so a rollback lands where it
+  should.
+- Edits of *different* kinds do coexist — a task can have both a tick and a
+  field edit waiting — so a successful push **re-bases the others** onto the
+  version it just produced. Without that, the second one would report a
+  conflict against this device's own first one. A genuine conflict still
+  surfaces, because a third party's change lands on a stamp nobody here has
+  seen. The same mechanism moves edits queued against a **placeholder** onto
+  the real id once its creation is accepted, so editing a task you just
+  captured offline works before it has ever reached the server.
 
 Retries ride the existing sync work: a queued edit schedules a
 connectivity-constrained one-shot sync, and the periodic sync flushes the
@@ -140,19 +160,32 @@ write. Detection therefore happens client-side, using the task's `updated`
 timestamp as its version.
 
 A queued edit records the `updated` stamp the task had when the edit was made.
-The write is already a read-modify-write — fetch the task, flip one field, post
-it back — so the fetch doubles as the check, and detecting a conflict costs no
-extra request:
+The write is already a read-modify-write — fetch the task, apply the change,
+post it back — so the fetch doubles as the check, and detecting a conflict
+costs no extra request:
 
 | At flush time | Result |
 |---|---|
 | Server's `updated` matches the recorded one | The write goes ahead |
 | It differs | **No POST is sent.** The edit is dropped, the server's version replaces the local row, and a notice is stored |
-| No recorded base (edit queued by an older build) | Check skipped — can't tell, so don't guess |
+| No recorded base (an edit made against a task this device created, or one queued by an older build) | Check skipped — nothing to conflict with, or can't tell |
 
-The local edit is discarded rather than merged. With a single boolean at stake
-there is nothing to merge, and keeping the local value quietly is exactly the
-silent overwrite the check exists to prevent.
+The comparison is made to **whole seconds**, which is not a tolerance but the
+precision the server has. Vikunja's `updated` column is a DATETIME that xorm
+writes formatted to seconds, while the task in a create or update *response* is
+serialised from the in-memory struct, where the full-precision `time.Now()` is
+still sitting. The same write therefore reports `…:12.345678901Z` in its
+response and reads back as `…:12Z` on the next fetch. Comparing exactly made
+this device's own successful write look like somebody else's change — which is
+how a task created offline, edited offline, and then synced came back as a
+conflict with itself.
+
+The local edit is discarded rather than merged, and keeping the local value
+quietly is exactly the silent overwrite the check exists to prevent. That was
+an easy trade while only `done` was editable — a boolean has nothing to merge.
+Now that titles and dates are editable it is a real cost: a rejected edit
+throws away something the user typed, and the notice names the task but not
+what was lost. Keeping the losing version is on the roadmap.
 
 Notices are stored in the database, not raised in the moment: the flush that
 finds a conflict usually runs in a background worker with no UI attached, so
@@ -315,12 +348,12 @@ Roughly in order:
    parent needs a second request (Vikunja keeps hierarchy in relations, not on
    the task) and, when the parent is itself an unsynced placeholder, a way to
    rewrite the reference once the real id arrives.
-2. More editing: change title, priority, labels and dates from the outline
-   (toggling done is in, and rides the same queue).
-3. Conflict handling for richer edits. Detection is in (see
-   [Conflicts](#conflicts)); once text fields are editable, "server wins" stops
-   being good enough and the losing version needs to be kept and shown rather
-   than dropped.
+2. More editing: labels, description and start dates. Title, priority and due
+   date are in — tap a heading in the outline or a row in the agenda.
+3. Keeping the losing version of a conflict. Detection is in and "server wins"
+   is honest about itself (see [Conflicts](#conflicts)), but now that text is
+   editable, a rejected edit throws away something the user typed, and that
+   deserves better than a notice.
 4. Quick-capture from outside the app — a share target and a widget button.
 4. Swipe gestures for state/priority changes, notifications for due tasks.
 6. Encrypted token storage.

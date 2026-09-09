@@ -47,15 +47,14 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.boxleits.vikunjaandroid.core.model.Project
+import com.boxleits.vikunjaandroid.core.model.Task
 import com.boxleits.vikunjaandroid.core.outline.OutlineNode
 import com.boxleits.vikunjaandroid.data.sync.ProjectOutline
 import com.boxleits.vikunjaandroid.data.sync.TaskConflict
+import com.boxleits.vikunjaandroid.ui.components.ConflictDialog
+import com.boxleits.vikunjaandroid.ui.components.EditTaskDialog
 import com.boxleits.vikunjaandroid.ui.components.OutlineTaskRow
 
-/**
- * Tells the user that edits of theirs were dropped in favour of the server's
- * newer version, and which tasks it happened to.
- */
 /**
  * Capture: a title, and which project it lands in.
  *
@@ -132,46 +131,6 @@ private fun CreateTaskDialog(
     )
 }
 
-@Composable
-private fun ConflictDialog(
-    conflicts: List<TaskConflict>,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                if (conflicts.size == 1) "A task changed on the server" else "Tasks changed on the server",
-            )
-        },
-        text = {
-            Column {
-                Text(
-                    text = if (conflicts.size == 1) {
-                        "This task was changed on the server in the meantime. Your " +
-                            "change to it was undone, and it now shows the most " +
-                            "recent version from the server."
-                    } else {
-                        "These tasks were changed on the server in the meantime. Your " +
-                            "changes to them were undone, and they now show the most " +
-                            "recent version from the server."
-                    },
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                conflicts.forEach { conflict ->
-                    Text(
-                        text = "• ${conflict.taskTitle}",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("OK") }
-        },
-    )
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OutlineScreen(viewModel: OutlineViewModel = hiltViewModel()) {
@@ -181,6 +140,30 @@ fun OutlineScreen(viewModel: OutlineViewModel = hiltViewModel()) {
     val conflicts by viewModel.conflicts.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showCreate by rememberSaveable { mutableStateOf(false) }
+    // The id rather than the task, so the open dialog survives a rotation and
+    // still reflects the task as the outline currently has it — including a
+    // change that arrived from a sync while it was open.
+    var editingTaskId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val editingTask = remember(projectOutlines, editingTaskId) {
+        editingTaskId?.let { id -> projectOutlines.firstNotNullOfOrNull { findTask(it.nodes, id) } }
+    }
+
+    // Gone from the outline while its dialog was open — synced away, or
+    // rejected. Closing beats leaving a dialog editing nothing.
+    LaunchedEffect(editingTaskId, editingTask) {
+        if (editingTaskId != null && editingTask == null) editingTaskId = null
+    }
+
+    editingTask?.let { task ->
+        EditTaskDialog(
+            task = task,
+            onDismiss = { editingTaskId = null },
+            onSave = { edits ->
+                viewModel.updateTask(task.id, edits)
+                editingTaskId = null
+            },
+        )
+    }
 
     if (showCreate) {
         CreateTaskDialog(
@@ -244,7 +227,11 @@ fun OutlineScreen(viewModel: OutlineViewModel = hiltViewModel()) {
                     )
                 }
             } else {
-                OutlineList(projectOutlines, onSetDone = viewModel::setDone)
+                OutlineList(
+                    projectOutlines = projectOutlines,
+                    onSetDone = viewModel::setDone,
+                    onEdit = { taskId -> editingTaskId = taskId },
+                )
             }
         }
     }
@@ -254,6 +241,7 @@ fun OutlineScreen(viewModel: OutlineViewModel = hiltViewModel()) {
 private fun OutlineList(
     projectOutlines: List<ProjectOutline>,
     onSetDone: (taskId: Long, done: Boolean) -> Unit,
+    onEdit: (taskId: Long) -> Unit,
 ) {
     val collapsedIds = rememberSaveable(saver = LongSetSaver) { mutableStateOf<Set<Long>>(emptySet()) }
     val collapsed = collapsedIds.value
@@ -283,10 +271,20 @@ private fun OutlineList(
                         collapsedIds.value = collapsedIds.value.toggle(node.task.id)
                     },
                     onSetDone = { done -> onSetDone(node.task.id, done) },
+                    onEdit = { onEdit(node.task.id) },
                 )
             }
         }
     }
+}
+
+/** Depth-first lookup, because a task can be at any level of the outline. */
+private fun findTask(nodes: List<OutlineNode>, id: Long): Task? {
+    for (node in nodes) {
+        if (node.task.id == id) return node.task
+        findTask(node.children, id)?.let { return it }
+    }
+    return null
 }
 
 private fun Set<Long>.toggle(id: Long): Set<Long> = if (id in this) this - id else this + id

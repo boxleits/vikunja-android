@@ -2,6 +2,7 @@ package com.boxleits.vikunjaandroid.ui.outline
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.boxleits.vikunjaandroid.core.repository.TaskEdits
 import com.boxleits.vikunjaandroid.data.sync.EditResult
 import com.boxleits.vikunjaandroid.data.sync.ProjectOutline
 import com.boxleits.vikunjaandroid.data.settings.SettingsRepository
@@ -98,6 +99,25 @@ class OutlineViewModel @Inject constructor(
                     settingsRepository.setLastProjectId(projectId)
                     _errorMessage.value = "Saved on this device — will sync when possible (${result.reason})"
                 }
+                is EditResult.Rejected -> _errorMessage.value = result.message
+            }
+        }
+    }
+
+    /**
+     * Saves an edit to a task's title, priority or due date.
+     *
+     * Same bargain as ticking one off: it shows immediately, survives having
+     * no connection, and is only taken back if the server refuses it outright
+     * or somebody else got there first.
+     */
+    fun updateTask(taskId: Long, edits: TaskEdits) {
+        viewModelScope.launch {
+            when (val result = taskEditRepository.updateTask(taskId, edits)) {
+                EditResult.Synced -> Unit
+                EditResult.Conflicted -> Unit
+                is EditResult.Queued ->
+                    _errorMessage.value = "Saved on this device — will sync when possible (${result.reason})"
                 is EditResult.Rejected -> _errorMessage.value = result.message
             }
         }

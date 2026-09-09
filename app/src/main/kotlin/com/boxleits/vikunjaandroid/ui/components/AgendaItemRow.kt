@@ -1,5 +1,6 @@
 package com.boxleits.vikunjaandroid.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,11 +17,14 @@ import androidx.compose.ui.unit.dp
 import com.boxleits.vikunjaandroid.core.agenda.AgendaItem
 
 @Composable
-fun AgendaItemRow(item: AgendaItem, modifier: Modifier = Modifier) {
+fun AgendaItemRow(item: AgendaItem, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val task = item.task
     Row(
         modifier = modifier
             .fillMaxWidth()
+            // The agenda is where a due date is usually wrong, so the whole
+            // row opens the editor rather than a separate affordance.
+            .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

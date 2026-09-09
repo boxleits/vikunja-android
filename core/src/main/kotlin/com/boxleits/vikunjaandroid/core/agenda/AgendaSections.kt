@@ -39,6 +39,10 @@ data class AgendaSections(
     val isEmpty: Boolean
         get() = overdue.isEmpty() && today.isEmpty() && tomorrow.isEmpty() && thisWeek.isEmpty() && later.isEmpty()
 
+    /** Every item, in the order the sections are shown. */
+    val all: List<AgendaItem>
+        get() = overdue + today + tomorrow + thisWeek + later
+
     companion object {
         val EMPTY = AgendaSections(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
     }

@@ -1,6 +1,7 @@
 package com.boxleits.vikunjaandroid.core.repository
 
 import com.boxleits.vikunjaandroid.core.api.VikunjaApiClient
+import com.boxleits.vikunjaandroid.core.model.Priority
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -233,6 +234,61 @@ class RemoteVikunjaRepositoryTest {
     }
 
     @Test
+    fun `a base version from a write response still matches what the server reads back`() = runTest {
+        // Reported from a device: a task created offline, then edited offline,
+        // came back as a conflict with itself on the first sync — and the
+        // conflict handling then replaced it with the server's copy, losing the
+        // priority and due date the edit carried.
+        //
+        // Vikunja's `updated` column is a DATETIME that xorm writes formatted
+        // to whole seconds, but the task in a create or update *response* is
+        // serialised from the in-memory struct, where the full-precision
+        // time.Now() is still sitting. So a write reports one stamp and reads
+        // back as another, and an exact comparison calls that somebody else's
+        // change.
+        val fromWriteResponse = Instant.parse("2024-01-15T10:00:00.345678901Z")
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"T","updated":"2024-01-15T10:00:00Z"}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"Edited","updated":"2024-01-15T10:05:00Z"}""",
+            ),
+        )
+
+        val result = repository.updateTask(
+            taskId = 7,
+            edits = TaskEdits(title = "Edited", priority = Priority.HIGH, dueDate = null),
+            expectedUpdatedAt = fromWriteResponse,
+        )
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Applied::class.java)
+        assertThat(server.requestCount).isEqualTo(2)
+    }
+
+    @Test
+    fun `a difference of whole seconds is still a conflict`() = runTest {
+        // The precision tolerance must not swallow a real change: one second
+        // apart is a different version, not a rounding artefact.
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"Renamed elsewhere","updated":"2024-01-15T10:00:01Z"}""",
+            ),
+        )
+
+        val result = repository.setTaskDone(
+            taskId = 7,
+            done = true,
+            expectedUpdatedAt = Instant.parse("2024-01-15T10:00:00.900000000Z"),
+        )
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Conflict::class.java)
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
     fun `setTaskDone treats a task with no server timestamp as a conflict against a known base`() = runTest {
         // A server that stops sending `updated` must not be read as "unchanged".
         server.enqueue(MockResponse().setBody("""{"id":7,"project_id":1,"title":"T","done":false}"""))
@@ -259,6 +315,97 @@ class RemoteVikunjaRepositoryTest {
         }
 
         assertThat(exception).isInstanceOf(VikunjaSyncException.Server::class.java)
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `updateTask writes the edited fields and keeps the ones it does not show`() = runTest {
+        // The edit form covers three fields. Everything else on the task —
+        // including `done`, which has its own path — has to come back
+        // untouched, or editing a title would silently un-tick a task.
+        val serverTask = """
+            {
+              "id": 7,
+              "project_id": 1,
+              "title": "Buy milk",
+              "description": "semi-skimmed",
+              "done": true,
+              "priority": 1,
+              "due_date": "2024-01-15T10:00:00Z",
+              "percent_done": 40,
+              "assignees": [{"id": 3}]
+            }
+        """.trimIndent()
+        server.enqueue(MockResponse().setBody(serverTask))
+        server.enqueue(MockResponse().setBody(serverTask))
+
+        repository.updateTask(
+            taskId = 7,
+            edits = TaskEdits(
+                title = "Buy oat milk",
+                priority = Priority.URGENT,
+                dueDate = Instant.parse("2024-02-01T09:30:00Z"),
+            ),
+        )
+
+        server.takeRequest() // the read the write is built on
+        val sent = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+
+        assertThat(sent["title"]!!.jsonPrimitive.content).isEqualTo("Buy oat milk")
+        assertThat(sent["priority"]!!.jsonPrimitive.int).isEqualTo(4)
+        assertThat(sent["due_date"]!!.jsonPrimitive.content).isEqualTo("2024-02-01T09:30:00Z")
+        assertThat(sent["done"]!!.jsonPrimitive.boolean).isTrue()
+        assertThat(sent["description"]!!.jsonPrimitive.content).isEqualTo("semi-skimmed")
+        assertThat(sent["percent_done"]!!.jsonPrimitive.int).isEqualTo(40)
+        assertThat(sent).containsKey("assignees")
+    }
+
+    @Test
+    fun `updateTask clears a due date with the zero date rather than omitting the field`() = runTest {
+        // Leaving due_date out would keep the old date, and Vikunja rejects
+        // null for it, so "no due date" has to be said as the zero date.
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"T","due_date":"2024-01-15T10:00:00Z"}""",
+            ),
+        )
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"T","due_date":"0001-01-01T00:00:00Z"}""",
+            ),
+        )
+
+        val result = repository.updateTask(
+            taskId = 7,
+            edits = TaskEdits(title = "T", priority = Priority.UNSET, dueDate = null),
+        )
+
+        server.takeRequest()
+        val sent = Json.parseToJsonElement(server.takeRequest().body.readUtf8()).jsonObject
+        assertThat(sent["due_date"]!!.jsonPrimitive.content).isEqualTo("0001-01-01T00:00:00Z")
+
+        // And the same zero date has to read back as "no date", closing the
+        // round trip rather than resurfacing as a date in the year one.
+        assertThat(result).isInstanceOf(TaskWriteResult.Applied::class.java)
+        assertThat((result as TaskWriteResult.Applied).task.dueDate).isNull()
+    }
+
+    @Test
+    fun `updateTask reports a conflict and writes nothing when the task moved on`() = runTest {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"id":7,"project_id":1,"title":"Renamed elsewhere","updated":"2024-01-15T12:00:00Z"}""",
+            ),
+        )
+
+        val result = repository.updateTask(
+            taskId = 7,
+            edits = TaskEdits(title = "Renamed here", priority = Priority.HIGH, dueDate = null),
+            expectedUpdatedAt = Instant.parse("2024-01-15T10:00:00Z"),
+        )
+
+        assertThat(result).isInstanceOf(TaskWriteResult.Conflict::class.java)
+        assertThat((result as TaskWriteResult.Conflict).serverTask.title).isEqualTo("Renamed elsewhere")
         assertThat(server.requestCount).isEqualTo(1)
     }
 
