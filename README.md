@@ -189,8 +189,30 @@ a new task, prefixed `[conflict] `, carrying the native Vikunja label
 it lands on the server, the web UI and every other client see the conflict too,
 rather than it being a notice on one phone.
 
-**One rule, no field inspection:** if the `updated` stamp differs, a copy is
-made. That is deliberate. An earlier design merged field by field — apply the
+**It is not a copy of the task, and "copy" oversells it.** The new task is
+built from the fields the queued edit happens to record — title, `done`,
+priority, due date and project — because those are the fields the edit dialog
+can change. Everything else on the original is left behind:
+
+| Carried over | Left behind |
+|---|---|
+| title (prefixed), `done`, priority, due date, project | **parent task**, description, labels, start/end date, reminders, repeat settings, colour, percent done, assignees, attachments |
+
+The parent relation is the one that hurts, and it was found by testing rather
+than by reading: a conflict on a **subtask produces a top-level task**. The
+others make the copy poorer; this one moves it somewhere else, out of the
+subtree that gave it its meaning, findable only by its label.
+
+The fix is known — build the copy from the server's task with this device's
+edit applied on top, so anything the device never expressed an opinion about
+comes along — but it is deliberately not built yet. It only pays off alongside
+being able to change relations from the phone, which the app cannot do at all;
+until then a correctly-parented copy would sit in the right place and still be
+unmovable and undeletable there. It is recorded against the promote/demote/refile
+entry in the Orgzly parity notes.
+
+**One rule, no field inspection:** if the `updated` stamp differs, the losing
+version is kept as its own task. That is deliberate. An earlier design merged field by field — apply the
 local title if nobody else touched the title, and so on — which fails on the
 first example anyone tries:
 
@@ -213,7 +235,7 @@ the rule stays one sentence long, and the semantic judgement — is this the sam
 errand or a different one? — goes to the person who can actually make it.
 
 **Which side loses is structural, not chronological.** The version that has not
-reached the server yet becomes the copy. No clock comparison: the server's
+reached the server yet is the one kept aside. No clock comparison: the server's
 stamp and this device's are two different clocks, and making the outcome depend
 on them agreeing would be a real fragility bought for a cosmetic decision —
 both versions survive either way. It is also one write instead of two, and it
