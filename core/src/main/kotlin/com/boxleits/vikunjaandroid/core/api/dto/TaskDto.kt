@@ -32,3 +32,12 @@ data class RelatedTaskRefDto(
 
 /** Vikunja relation-kind key used for a task's parent within [TaskDto.relatedTasks]. */
 const val RELATION_KIND_PARENT_TASK = "parenttask"
+
+/**
+ * Points a conflict copy at the task it was copied from.
+ *
+ * Chosen over `related` because it carries a direction: from the relation
+ * alone you can tell which of the two is the copy. Vikunja creates the
+ * `copiedto` inverse on the original itself, so both sides show the link.
+ */
+const val RELATION_KIND_COPIED_FROM = "copiedfrom"

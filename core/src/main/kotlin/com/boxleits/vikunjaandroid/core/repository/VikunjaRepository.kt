@@ -1,6 +1,7 @@
 package com.boxleits.vikunjaandroid.core.repository
 
 import com.boxleits.vikunjaandroid.core.api.VikunjaApi
+import com.boxleits.vikunjaandroid.core.api.dto.LabelDto
 import com.boxleits.vikunjaandroid.core.api.dto.RELATION_KIND_PARENT_TASK
 import com.boxleits.vikunjaandroid.core.api.dto.TaskDto
 import com.boxleits.vikunjaandroid.core.mapper.formatVikunjaInstant
@@ -75,7 +76,30 @@ interface VikunjaRepository {
      * Returns the task as the server created it, which is the only place its
      * real id comes from — a locally created task has none until this returns.
      */
-    suspend fun createTask(projectId: Long, title: String, parentTaskId: Long? = null): Task
+    /**
+     * The optional fields exist for a conflict copy, which has to arrive
+     * complete: it stands in for a version of a task that already had a
+     * priority, a due date, or a tick, and creating it blank would lose
+     * exactly what it is there to preserve.
+     */
+    suspend fun createTask(
+        projectId: Long,
+        title: String,
+        parentTaskId: Long? = null,
+        done: Boolean = false,
+        priority: Priority = Priority.UNSET,
+        dueDate: Instant? = null,
+    ): Task
+
+    /** Relates one task to another; Vikunja adds the inverse itself. */
+    suspend fun relateTask(taskId: Long, otherTaskId: Long, kind: String)
+
+    /** The user's labels, for finding one by name before minting it. */
+    suspend fun fetchLabels(): List<Label>
+
+    suspend fun createLabel(title: String, hexColor: String? = null): Label
+
+    suspend fun addLabelToTask(taskId: Long, labelId: Long)
 
     /**
      * Applies [edits] to a task, unless it changed on the server first.
@@ -95,6 +119,8 @@ private const val FIELD_PRIORITY = "priority"
 private const val FIELD_DUE_DATE = "due_date"
 private const val FIELD_OTHER_TASK_ID = "other_task_id"
 private const val FIELD_RELATION_KIND = "relation_kind"
+private const val FIELD_LABEL_ID = "label_id"
+private const val FIELD_HEX_COLOR = "hex_color"
 
 class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
 
@@ -168,8 +194,24 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
         TaskWriteResult.Applied(json.decodeFromJsonElement(TaskDto.serializer(), saved).toDomain())
     }
 
-    override suspend fun createTask(projectId: Long, title: String, parentTaskId: Long?): Task = wrapErrors {
-        val created = requireBody(api.createTask(projectId, JsonObject(mapOf(FIELD_TITLE to JsonPrimitive(title)))))
+    override suspend fun createTask(
+        projectId: Long,
+        title: String,
+        parentTaskId: Long?,
+        done: Boolean,
+        priority: Priority,
+        dueDate: Instant?,
+    ): Task = wrapErrors {
+        // Only what differs from the server's own defaults is sent. A quick
+        // capture stays a one-field payload; a conflict copy carries whatever
+        // the version it stands for had.
+        val payload = buildMap {
+            put(FIELD_TITLE, JsonPrimitive(title))
+            if (done) put(FIELD_DONE, JsonPrimitive(true))
+            if (priority != Priority.UNSET) put(FIELD_PRIORITY, JsonPrimitive(priority.value))
+            if (dueDate != null) put(FIELD_DUE_DATE, JsonPrimitive(formatVikunjaInstant(dueDate)))
+        }
+        val created = requireBody(api.createTask(projectId, JsonObject(payload)))
         val task = json.decodeFromJsonElement(TaskDto.serializer(), created).toDomain()
 
         if (parentTaskId == null) return@wrapErrors task
@@ -178,18 +220,44 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
         // itself — the hierarchy lives in relations. The task exists either
         // way by this point; a failure here leaves it correctly created but at
         // the top level, which is recoverable, unlike losing it.
-        requireBody(
-            api.createRelation(
-                taskId = task.id,
-                relation = JsonObject(
-                    mapOf(
-                        FIELD_OTHER_TASK_ID to JsonPrimitive(parentTaskId),
-                        FIELD_RELATION_KIND to JsonPrimitive(RELATION_KIND_PARENT_TASK),
+        relateTask(taskId = task.id, otherTaskId = parentTaskId, kind = RELATION_KIND_PARENT_TASK)
+        task.copy(parentTaskId = parentTaskId)
+    }
+
+    override suspend fun relateTask(taskId: Long, otherTaskId: Long, kind: String) {
+        wrapErrors {
+            requireBody(
+                api.createRelation(
+                    taskId = taskId,
+                    relation = JsonObject(
+                        mapOf(
+                            FIELD_OTHER_TASK_ID to JsonPrimitive(otherTaskId),
+                            FIELD_RELATION_KIND to JsonPrimitive(kind),
+                        ),
                     ),
                 ),
-            ),
-        )
-        task.copy(parentTaskId = parentTaskId)
+            )
+        }
+    }
+
+    override suspend fun fetchLabels(): List<Label> = wrapErrors {
+        api.getLabels().map { it.toDomain() }
+    }
+
+    override suspend fun createLabel(title: String, hexColor: String?): Label = wrapErrors {
+        val payload = buildMap {
+            put(FIELD_TITLE, JsonPrimitive(title))
+            if (hexColor != null) put(FIELD_HEX_COLOR, JsonPrimitive(hexColor))
+        }
+        requireBody(api.createLabel(JsonObject(payload))).toDomain()
+    }
+
+    override suspend fun addLabelToTask(taskId: Long, labelId: Long) {
+        wrapErrors {
+            requireBody(
+                api.addLabelToTask(taskId, JsonObject(mapOf(FIELD_LABEL_ID to JsonPrimitive(labelId)))),
+            )
+        }
     }
 
     /**
@@ -209,7 +277,7 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
      */
     private fun Instant.toServerPrecision(): Instant = Instant.fromEpochSeconds(epochSeconds)
 
-    private fun requireBody(response: Response<JsonObject>): JsonObject {
+    private fun <T> requireBody(response: Response<T>): T {
         if (!response.isSuccessful) {
             if (response.code() == 401) throw VikunjaSyncException.Unauthorized()
             throw VikunjaSyncException.Server(response.code(), response.errorBody()?.string())

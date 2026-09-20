@@ -13,8 +13,8 @@ import androidx.compose.ui.unit.dp
 import com.boxleits.vikunjaandroid.data.sync.TaskConflict
 
 /**
- * Tells the user that edits of theirs were dropped in favour of the server's
- * newer version, and which tasks it happened to.
+ * Tells the user that a task changed on the server while they were editing it,
+ * and that their version was kept as a separate task rather than thrown away.
  */
 @Composable
 fun ConflictDialog(
@@ -32,13 +32,15 @@ fun ConflictDialog(
             Column {
                 Text(
                     text = if (conflicts.size == 1) {
-                        "This task was changed on the server in the meantime. Your " +
-                            "change to it was undone, and it now shows the most " +
-                            "recent version from the server."
+                        "This task was changed on the server while you were editing it. " +
+                            "It now shows the server's version, and your version was kept " +
+                            "as a separate task marked [conflict]. Decide which one you " +
+                            "want and delete the other."
                     } else {
-                        "These tasks were changed on the server in the meantime. Your " +
-                            "changes to them were undone, and they now show the most " +
-                            "recent version from the server."
+                        "These tasks were changed on the server while you were editing " +
+                            "them. They now show the server's versions, and yours were " +
+                            "kept as separate tasks marked [conflict]. Decide which ones " +
+                            "you want and delete the others."
                     },
                 )
                 Spacer(modifier = Modifier.height(12.dp))

@@ -6,6 +6,7 @@ import com.boxleits.vikunjaandroid.data.local.AppDatabase
 import com.boxleits.vikunjaandroid.data.local.MIGRATION_2_3
 import com.boxleits.vikunjaandroid.data.local.MIGRATION_3_4
 import com.boxleits.vikunjaandroid.data.local.MIGRATION_4_5
+import com.boxleits.vikunjaandroid.data.local.MIGRATION_5_6
 import com.boxleits.vikunjaandroid.data.local.dao.ConflictNoticeDao
 import com.boxleits.vikunjaandroid.data.local.dao.LabelDao
 import com.boxleits.vikunjaandroid.data.local.dao.PendingEditDao
@@ -29,7 +30,7 @@ object DatabaseModule {
             // pending_edits is not cache — it holds edits the server hasn't
             // accepted — so schema changes from here on get a real migration
             // rather than dropping the user's queued work on the floor.
-            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             // Still here for a downgrade or a version with no path, where the
             // alternative is refusing to open the database at all. Everything
             // except pending_edits is a cache the next sync rebuilds.

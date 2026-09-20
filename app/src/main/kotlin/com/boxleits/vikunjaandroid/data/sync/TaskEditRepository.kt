@@ -3,6 +3,7 @@ package com.boxleits.vikunjaandroid.data.sync
 import com.boxleits.vikunjaandroid.core.model.Priority
 import com.boxleits.vikunjaandroid.core.model.Task
 import com.boxleits.vikunjaandroid.core.repository.RemoteVikunjaRepository
+import com.boxleits.vikunjaandroid.core.api.dto.RELATION_KIND_COPIED_FROM
 import com.boxleits.vikunjaandroid.core.repository.TaskEdits
 import com.boxleits.vikunjaandroid.core.repository.TaskWriteResult
 import com.boxleits.vikunjaandroid.core.repository.VikunjaSyncException
@@ -12,7 +13,9 @@ import com.boxleits.vikunjaandroid.data.local.entity.ConflictNoticeEntity
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_CREATE_TASK
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_SET_DONE
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_UPDATE_TASK
+import com.boxleits.vikunjaandroid.data.local.entity.LabelEntity
 import com.boxleits.vikunjaandroid.data.local.entity.PendingEditEntity
+import com.boxleits.vikunjaandroid.data.local.entity.losingVersion
 import com.boxleits.vikunjaandroid.data.local.entity.toEntity
 import com.boxleits.vikunjaandroid.data.local.entity.toPlaceholderTask
 import kotlinx.coroutines.flow.Flow
@@ -34,9 +37,11 @@ sealed class EditResult {
     data class Rejected(val message: String) : EditResult()
 
     /**
-     * The task had already changed on the server, so the edit was dropped and
-     * the server's version kept. Reported separately because the user is told
-     * about it through the conflict notices, not through an error.
+     * The task had already changed on the server, so its version was kept and
+     * this device's was turned into a separate `[conflict]` task. Reported
+     * separately because the user is told about it through the conflict
+     * notices, not through an error — and because nothing was lost, so it is
+     * not a failure.
      */
     data object Conflicted : EditResult()
 }
@@ -51,6 +56,11 @@ data class TaskConflict(val taskId: Long, val taskTitle: String)
  * for a reason that might pass later stays queued and keeps its local effect,
  * rather than being undone under the user. Only a failure that can never
  * succeed — the server rejecting this particular request — rolls the row back.
+ *
+ * Losing a conflict is not such a failure. The server's version takes the task
+ * back, and this device's version becomes a task of its own, titled
+ * `[conflict] …` and labelled, so no edit is ever silently discarded and the
+ * choice between the two is left to the person who can actually make it.
  */
 @Singleton
 class TaskEditRepository @Inject constructor(
@@ -144,6 +154,14 @@ class TaskEditRepository @Inject constructor(
                 done = done,
                 previousDone = previousDone,
                 previousDoneAtEpochMs = previousDoneAt,
+                // The rest of the base is recorded even though a tick doesn't
+                // change it: if this edit loses a conflict, the copy that
+                // preserves it needs a title, and the title it needs is the one
+                // the task had when the tick was made — not whatever the server
+                // has renamed it to since.
+                previousTitle = queued?.previousTitle ?: before.title,
+                previousPriority = queued?.previousPriority ?: before.priority,
+                previousDueDateEpochMs = queued?.previousDueDateEpochMs ?: before.dueDateEpochMs,
                 baseUpdatedAtEpochMs = baseUpdatedAt,
                 createdAtEpochMs = now.toEpochMilliseconds(),
             ),
@@ -224,6 +242,7 @@ class TaskEditRepository @Inject constructor(
         val queuedIds = pendingDao.getAll().map { it.id }
         if (queuedIds.isEmpty()) return FlushOutcome(pushed = 0, stillQueued = 0, rejected = 0, conflicted = 0)
 
+
         val api = apiProvider.getApi()
             ?: return FlushOutcome(
                 pushed = 0,
@@ -240,7 +259,17 @@ class TaskEditRepository @Inject constructor(
         var conflicted = 0
         var message: String? = null
 
-        for (editId in queuedIds) {
+        // A conflict queues a copy behind the edit that lost it, so the queue
+        // grows while it is being drained. Working from a deque rather than the
+        // snapshot lets those copies be pushed in this same flush instead of
+        // waiting for the next sync; `handled` keeps that from looping, however
+        // the queue behaves.
+        val remaining = ArrayDeque(queuedIds)
+        val handled = mutableSetOf<Long>()
+
+        while (remaining.isNotEmpty()) {
+            val editId = remaining.removeFirst()
+            if (!handled.add(editId)) continue
             // Re-read rather than trusting the snapshot: pushing an earlier
             // edit can have rewritten this one — a create gives its task a real
             // id, and a successful write moves the base version the next edit
@@ -253,6 +282,9 @@ class TaskEditRepository @Inject constructor(
                         val created = remote.createTask(
                             projectId = requireNotNull(edit.projectId) { "a queued create must know its project" },
                             title = requireNotNull(edit.title) { "a queued create must know its title" },
+                            done = edit.done,
+                            priority = Priority.fromValue(edit.priority ?: 0),
+                            dueDate = edit.dueDateEpochMs?.let { Instant.fromEpochMilliseconds(it) },
                         )
                         database.withTransaction {
                             // The placeholder is replaced rather than updated:
@@ -278,6 +310,11 @@ class TaskEditRepository @Inject constructor(
                                 newTaskId = created.id,
                                 updatedAtEpochMs = null,
                             )
+                        }
+                        // Only now does the copy have a real id to label and to
+                        // point at its original.
+                        edit.conflictOfTaskId?.let { originalId ->
+                            markAsConflictCopy(remote, copyId = created.id, originalId = originalId)
                         }
                         pushed++
                     }
@@ -314,7 +351,7 @@ class TaskEditRepository @Inject constructor(
                             }
 
                             is TaskWriteResult.Conflict -> {
-                                recordConflict(outcome.serverTask, edit.id)
+                                remaining += recordConflict(outcome.serverTask, edit)
                                 conflicted++
                             }
                         }
@@ -347,7 +384,7 @@ class TaskEditRepository @Inject constructor(
                             }
 
                             is TaskWriteResult.Conflict -> {
-                                recordConflict(outcome.serverTask, edit.id)
+                                remaining += recordConflict(outcome.serverTask, edit)
                                 conflicted++
                             }
                         }
@@ -413,18 +450,95 @@ class TaskEditRepository @Inject constructor(
      * version check is to stop a silent overwrite, and quietly keeping the
      * local value would be exactly that.
      */
-    private suspend fun recordConflict(serverTask: Task, editId: Long) {
-        database.withTransaction {
-            database.taskDao().upsert(serverTask.toEntity())
+    private suspend fun recordConflict(serverTask: Task, edit: PendingEditEntity): Long {
+        val losing = edit.losingVersion()
+        val now = Clock.System.now()
+
+        return database.withTransaction {
+            val taskDao = database.taskDao()
+            val pendingDao = database.pendingEditDao()
+
+            // The server's version takes the task back, whole.
+            taskDao.upsert(serverTask.toEntity())
+
+            // And this device's version becomes a task of its own rather than
+            // being thrown away. Same placeholder machinery as an ordinary
+            // capture: it shows up at once and reaches the server on the next
+            // push, so a copy is never lost to the network dropping here.
+            val placeholderId = minOf(taskDao.lowestId() ?: 0L, 0L) - 1
+            val copy = PendingEditEntity(
+                taskId = placeholderId,
+                type = EDIT_TYPE_CREATE_TASK,
+                done = losing.done,
+                previousDone = losing.done,
+                previousDoneAtEpochMs = null,
+                title = CONFLICT_TITLE_PREFIX + losing.title,
+                projectId = serverTask.projectId,
+                priority = losing.priority,
+                dueDateEpochMs = losing.dueDateEpochMs,
+                conflictOfTaskId = serverTask.id,
+                baseUpdatedAtEpochMs = null,
+                createdAtEpochMs = now.toEpochMilliseconds(),
+            )
+            taskDao.upsert(copy.toPlaceholderTask())
+            pendingDao.upsert(copy)
+
             database.conflictNoticeDao().upsert(
                 ConflictNoticeEntity(
                     taskId = serverTask.id,
                     taskTitle = serverTask.title,
-                    detectedAtEpochMs = Clock.System.now().toEpochMilliseconds(),
+                    detectedAtEpochMs = now.toEpochMilliseconds(),
                 ),
             )
-            database.pendingEditDao().deleteById(editId)
+            // Dropped only now that the copy holding it is queued, and in the
+            // same transaction, so there is no moment where this device's
+            // version exists nowhere.
+            pendingDao.deleteById(edit.id)
+            requireNotNull(pendingDao.find(placeholderId, EDIT_TYPE_CREATE_TASK)) {
+                "the conflict copy must be queued"
+            }.id
         }
+    }
+
+    /**
+     * Labels a conflict copy and points it at the task it was copied from.
+     *
+     * Deliberately swallows failures. The copy already exists and already says
+     * `[conflict]` in its title — the part that must not be lost is safe. The
+     * label and the link are findability, and nothing retries them; risking the
+     * copy for them would be the wrong way round.
+     */
+    private suspend fun markAsConflictCopy(
+        remote: RemoteVikunjaRepository,
+        copyId: Long,
+        originalId: Long,
+    ) {
+        try {
+            conflictLabelId(remote)?.let { labelId -> remote.addLabelToTask(copyId, labelId) }
+            remote.relateTask(taskId = copyId, otherTaskId = originalId, kind = RELATION_KIND_COPIED_FROM)
+        } catch (e: VikunjaSyncException) {
+            // See above: the copy stands on its own without these.
+        }
+    }
+
+    /**
+     * Finds the label conflict copies carry, minting it the first time.
+     *
+     * Best-effort by design: a copy without its label is still a task with a
+     * `[conflict]` title and a link to its original, which is recoverable. A
+     * copy that failed to be created at all would not be.
+     */
+    private suspend fun conflictLabelId(remote: RemoteVikunjaRepository): Long? = try {
+        val labelDao = database.labelDao()
+        val existing = labelDao.findByTitle(CONFLICT_LABEL_TITLE)
+            ?: remote.fetchLabels()
+                .firstOrNull { it.title.equals(CONFLICT_LABEL_TITLE, ignoreCase = true) }
+                ?.let { found -> LabelEntity(found.id, found.title, found.hexColor).also { labelDao.upsert(it) } }
+            ?: remote.createLabel(CONFLICT_LABEL_TITLE, CONFLICT_LABEL_COLOUR)
+                .let { made -> LabelEntity(made.id, made.title, made.hexColor).also { labelDao.upsert(it) } }
+        existing.id
+    } catch (e: VikunjaSyncException) {
+        null
     }
 }
 
@@ -442,3 +556,11 @@ data class FlushOutcome(
         else -> EditResult.Synced
     }
 }
+
+/** Marks a conflict copy in any list that shows only a title — the widget included. */
+const val CONFLICT_TITLE_PREFIX = "[conflict] "
+
+/** Native Vikunja label, so conflict copies are filterable in the web UI too. */
+const val CONFLICT_LABEL_TITLE = "sync-conflict"
+
+private const val CONFLICT_LABEL_COLOUR = "e8412c"

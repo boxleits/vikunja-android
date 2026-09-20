@@ -25,7 +25,7 @@ import com.boxleits.vikunjaandroid.data.local.entity.TaskLabelCrossRef
         PendingEditEntity::class,
         ConflictNoticeEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +34,18 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun labelDao(): LabelDao
     abstract fun pendingEditDao(): PendingEditDao
     abstract fun conflictNoticeDao(): ConflictNoticeDao
+}
+
+/**
+ * Marks a queued creation as a conflict copy and names what it was copied from.
+ *
+ * Nullable, so the ALTER needs no default: every creation queued before this
+ * version is an ordinary capture, which is exactly what null means here.
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN conflictOfTaskId INTEGER")
+    }
 }
 
 /**
