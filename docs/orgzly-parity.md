@@ -155,6 +155,31 @@ The queue makes these interesting offline, since a relation change is not a fiel
 change and does not fit the current `pending_edits` shape. That is the actual
 work, not the API calls.
 
+**A known bug rides along with this one.** Testing the conflict copies turned up
+that a conflict on a *subtask* produces a *top-level* task: the copy is built
+from the fields the queued edit records — title, `done`, priority, due date,
+project — and the parent relation is not among them. The fix is to build the
+copy from the server's task with this device's edit applied on top, so anything
+the device never expressed an opinion about (parent, description, labels, dates)
+comes along.
+
+It was deliberately left until this item, because on its own it does not pay: a
+correctly-parented copy would sit in the right place and still be unmovable and
+undeletable, since the app can neither change relations nor delete a task. Doing
+both together is what makes a conflict on a subtask something the user can
+actually resolve on the phone.
+
+Storing the extra fields wants **one JSON snapshot column** on the queued edit
+rather than a column per attribute — the same argument that killed the
+field-by-field conflict merge: attributes keep arriving, and a design that costs
+a migration each time ages badly. The queued row lives for seconds; it is a
+snapshot, not a model.
+
+Still out of reach even then: **attachments** (would need downloading and
+re-uploading), **reminders** (the `reminders[]` array is not read at all — see
+[`notifications.md`](notifications.md)), and **assignees**, where silently
+re-assigning somebody out of a conflict seems wrong regardless of feasibility.
+
 ### Multi-select and bulk actions
 
 `POST /api/v1/tasks/bulk` takes a set of task ids and one set of changes. Marking
@@ -202,7 +227,8 @@ written, rather than retrofitting it.
 5. **Quick capture** — a share target and a widget button.
 6. **Reminders and notifications** ([`notifications.md`](notifications.md)).
 7. **Searches**, then the widget bound to them ([`saved-searches.md`](saved-searches.md)).
-8. **Promote / demote / refile**, then multi-select.
+8. **Promote / demote / refile**, then multi-select — and with them the
+   conflict-copy parent bug above, which is waiting on exactly this.
 9. **Views and real positions** — only when manual ordering is genuinely wanted,
    because it reshapes the sync.
 
