@@ -3,6 +3,7 @@ package com.boxleits.vikunjaandroid.data.local.entity
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import kotlinx.serialization.json.Json
 
 const val EDIT_TYPE_SET_DONE = "SET_DONE"
 
@@ -24,6 +25,16 @@ const val EDIT_TYPE_CREATE_TASK = "CREATE_TASK"
  * title the user retyped in between.
  */
 const val EDIT_TYPE_UPDATE_TASK = "UPDATE_TASK"
+
+/**
+ * A task removed locally that the server hasn't removed yet.
+ *
+ * The odd one out: every other edit changes a row that stays, so rolling one
+ * back means writing the old values into it. A deletion takes the row with it,
+ * so the row itself has to be carried along in [PendingEditEntity.taskSnapshotJson]
+ * until the server agrees.
+ */
+const val EDIT_TYPE_DELETE_TASK = "DELETE_TASK"
 
 /**
  * An edit made locally that the server hasn't accepted yet.
@@ -66,6 +77,15 @@ data class PendingEditEntity(
     val previousTitle: String? = null,
     val previousPriority: Int? = null,
     val previousDueDateEpochMs: Long? = null,
+    /**
+     * DELETE_TASK only: the whole row as it stood, so a deletion the server
+     * refuses can be put back rather than being lost.
+     *
+     * A serialised snapshot rather than a column per field, because the fields
+     * a task has keep growing and a column each would mean a migration each
+     * time. The row lives for seconds — it is a snapshot, not a model.
+     */
+    val taskSnapshotJson: String? = null,
     /**
      * The task's server `updated` stamp when the edit was made. If the server's
      * differs at flush time, somebody else got there first. Null for an edit
@@ -139,4 +159,20 @@ fun PendingEditEntity.losingVersion(): LosingVersion = when (type) {
         priority = previousPriority ?: 0,
         dueDateEpochMs = previousDueDateEpochMs,
     )
+}
+
+/**
+ * The row a queued deletion removed, for putting back if the server refuses.
+ *
+ * Returns null rather than throwing when the snapshot is missing or no longer
+ * parses: an edit queued by an older build has none, and failing to restore a
+ * row is bad but recoverable — the next sync brings the task back, because a
+ * refused deletion means the server still has it.
+ */
+fun PendingEditEntity.restoredTask(json: Json): TaskEntity? = taskSnapshotJson?.let { raw ->
+    try {
+        json.decodeFromString(TaskEntity.serializer(), raw)
+    } catch (e: IllegalArgumentException) {
+        null
+    }
 }

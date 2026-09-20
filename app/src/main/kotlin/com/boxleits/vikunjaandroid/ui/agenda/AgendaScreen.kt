@@ -62,6 +62,10 @@ fun AgendaScreen(viewModel: AgendaViewModel = hiltViewModel()) {
                 viewModel.updateTask(task.id, edits)
                 editingTaskId = null
             },
+            onDelete = {
+                viewModel.deleteTask(task.id)
+                editingTaskId = null
+            },
         )
     }
 

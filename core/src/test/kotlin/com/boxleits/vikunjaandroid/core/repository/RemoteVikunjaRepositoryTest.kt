@@ -487,6 +487,68 @@ class RemoteVikunjaRepositoryTest {
     }
 
     @Test
+    fun `deleteTask uses DELETE on the task route and tolerates an empty body`() = runTest {
+        // Vikunja answers a delete with a message object, but nothing here
+        // reads it — and a server that answers 204 with no body at all must
+        // not be treated as a failure.
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        repository.deleteTask(taskId = 7)
+
+        val request = server.takeRequest()
+        assertThat(request.method).isEqualTo("DELETE")
+        assertThat(request.path).isEqualTo("/api/v1/tasks/7")
+        assertThat(request.body.size).isEqualTo(0L)
+    }
+
+    @Test
+    fun `deleteTask sends no version and asks nothing first`() = runTest {
+        // Every other write here reads the task before writing it, both to
+        // build the payload and to detect a conflict. A deletion needs neither:
+        // it does not depend on what the task currently says.
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"message":"ok"}"""))
+
+        repository.deleteTask(taskId = 7)
+
+        assertThat(server.requestCount).isEqualTo(1)
+    }
+
+    @Test
+    fun `deleting a task the server no longer has counts as deleted`() = runTest {
+        // Not pedantry: the caller undoes a permanently refused deletion by
+        // putting the removed row back, and doing that for a task the server
+        // has already deleted would resurrect it on screen.
+        server.enqueue(MockResponse().setResponseCode(404).setBody("""{"message":"does not exist"}"""))
+
+        val exception = try {
+            repository.deleteTask(taskId = 7)
+            null
+        } catch (e: VikunjaSyncException) {
+            e
+        }
+
+        assertThat(exception).isNull()
+    }
+
+    @Test
+    fun `a refused delete is surfaced as a server error`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(403).setBody("""{"message":"no write access"}"""))
+
+        val exception = try {
+            repository.deleteTask(taskId = 7)
+            null
+        } catch (e: VikunjaSyncException) {
+            e
+        }
+
+        assertThat(exception).isInstanceOf(VikunjaSyncException.Server::class.java)
+        assertThat((exception as VikunjaSyncException.Server).statusCode).isEqualTo(403)
+        // Permanent, which is what makes the queue put the row back instead of
+        // retrying for ever.
+        assertThat(exception.isRetryable()).isFalse()
+    }
+
+    @Test
     fun `a 401 response is surfaced as Unauthorized`() = runTest {
         server.enqueue(MockResponse().setResponseCode(401))
 

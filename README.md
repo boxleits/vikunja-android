@@ -89,6 +89,10 @@ the one field that has to be said out loud — an omitted `due_date` keeps the
 old value and Vikunja refuses `null` — so "no date" is written as the zero date
 `0001-01-01T00:00:00Z` that the reader already treats as unset.
 
+Deleting a task works the same way and is described under the outcome table
+below: the row goes at once, the deletion is queued, and the row travels with it
+so a refusal can put it back.
+
 Writes go through a queue (`pending_edits`):
 
 1. The edit is applied to the local row, so the UI reacts at once.
@@ -102,7 +106,26 @@ What happens next depends on *why* a push failed, which
 |---|---|---|
 | Accepted | dropped | overwritten with the server's version |
 | Offline, 5xx, 429, 401 | kept, retried later | keeps the edit |
-| 4xx (task gone, payload refused) | dropped | rolled back to the recorded previous value |
+| 4xx (payload refused, no write access) | dropped | rolled back to the recorded previous value |
+
+Deleting is the odd one out and gets its own row, because the thing a rollback
+would normally write into is not there any more:
+
+| | |
+|---|---|
+| Local row | removed at once; the queued deletion **carries a snapshot of it** so a refusal can put it back |
+| Version check | none — a deletion does not depend on what the task currently says, and a `[conflict]` copy of a task the user just deleted would be absurd |
+| Server says 404 | **success.** A task the server no longer has is the state the call asked for; restoring the row there would resurrect it on screen until the next sync removed it again |
+| Unsynced task (negative id) | no server call at all — the row and the queued creation are dropped together |
+| Subtasks | survive. Vikunja soft-deletes and leaves relations alone, so children move up a level rather than going with the parent |
+
+Vikunja keeps deleted tasks for **30 days** before a cleanup job removes them
+for good, which is why this client can treat deletion as ordinary rather than
+as the one irreversible action. The confirm dialog says so.
+
+The snapshot is a serialised row in one column rather than a column per field.
+The fields a task has keep growing, and a column each would mean a migration
+each time; the queued row lives for seconds, so it is a snapshot, not a model.
 
 Three details keep the queue, the wholesale replace, and edits of different
 kinds from fighting:
@@ -433,6 +456,9 @@ Roughly in order:
    rewrite the reference once the real id arrives.
 2. More editing: labels, description and start dates. Title, priority and due
    date are in — tap a heading in the outline or a row in the agenda.
-3. Notifications for due tasks, and swipe gestures for state and priority.
-4. Quick-capture from outside the app — a share target and a widget button.
-5. Encrypted token storage.
+3. Swipe gestures — deleting exists but only from the edit dialog, and a swipe
+   in the list is where Orgzly puts it. Then state and priority on the same
+   gesture.
+4. Notifications for due tasks.
+5. Quick-capture from outside the app — a share target and a widget button.
+6. Encrypted token storage.

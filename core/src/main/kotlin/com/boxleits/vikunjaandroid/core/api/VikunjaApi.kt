@@ -8,6 +8,7 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.DELETE
 import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -70,6 +71,19 @@ interface VikunjaApi {
      */
     @PUT("api/v1/tasks/{task}/relations")
     suspend fun createRelation(@Path("task") taskId: Long, @Body relation: JsonObject): Response<JsonObject>
+
+    /**
+     * Deletes a task.
+     *
+     * Vikunja soft-deletes: the row gets a `deleted_at` stamp and is kept for
+     * thirty days before the cleanup job removes it for good. That is worth
+     * knowing before treating this call as irreversible — it is recoverable
+     * server-side, just not through this API.
+     *
+     * The response body is unused; only the status code matters.
+     */
+    @DELETE("api/v1/tasks/{id}")
+    suspend fun deleteTask(@Path("id") id: Long): Response<Unit>
 
     /**
      * Creates a label. Same PUT-to-create convention as tasks.

@@ -162,6 +162,10 @@ fun OutlineScreen(viewModel: OutlineViewModel = hiltViewModel()) {
                 viewModel.updateTask(task.id, edits)
                 editingTaskId = null
             },
+            onDelete = {
+                viewModel.deleteTask(task.id)
+                editingTaskId = null
+            },
         )
     }
 

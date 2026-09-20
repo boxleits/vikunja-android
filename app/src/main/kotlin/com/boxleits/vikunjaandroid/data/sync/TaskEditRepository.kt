@@ -11,11 +11,14 @@ import com.boxleits.vikunjaandroid.core.repository.isRetryable
 import com.boxleits.vikunjaandroid.data.local.AppDatabase
 import com.boxleits.vikunjaandroid.data.local.entity.ConflictNoticeEntity
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_CREATE_TASK
+import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_DELETE_TASK
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_SET_DONE
 import com.boxleits.vikunjaandroid.data.local.entity.EDIT_TYPE_UPDATE_TASK
 import com.boxleits.vikunjaandroid.data.local.entity.LabelEntity
 import com.boxleits.vikunjaandroid.data.local.entity.PendingEditEntity
+import com.boxleits.vikunjaandroid.data.local.entity.TaskEntity
 import com.boxleits.vikunjaandroid.data.local.entity.losingVersion
+import com.boxleits.vikunjaandroid.data.local.entity.restoredTask
 import com.boxleits.vikunjaandroid.data.local.entity.toEntity
 import com.boxleits.vikunjaandroid.data.local.entity.toPlaceholderTask
 import kotlinx.coroutines.flow.Flow
@@ -23,6 +26,7 @@ import kotlinx.coroutines.flow.map
 import androidx.room.withTransaction
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -69,6 +73,8 @@ class TaskEditRepository @Inject constructor(
     private val syncScheduler: SyncScheduler,
     private val widgetRefresher: WidgetRefresher,
 ) {
+    private val json = Json { ignoreUnknownKeys = true }
+
     /** How many edits are waiting for the server. */
     fun observePendingCount(): Flow<Int> = database.pendingEditDao().observeCount()
 
@@ -233,6 +239,63 @@ class TaskEditRepository @Inject constructor(
     }
 
     /**
+     * Removes a task, locally first.
+     *
+     * Deleting is the only edit whose rollback cannot be a write: there is no
+     * row left to write into. So the row travels with the queued deletion and
+     * is put back if the server refuses.
+     */
+    suspend fun deleteTask(taskId: Long): EditResult {
+        val taskDao = database.taskDao()
+        val pendingDao = database.pendingEditDao()
+
+        val before = taskDao.findById(taskId)
+            ?: return EditResult.Rejected("That task is no longer in the local copy — try syncing.")
+
+        val now = Clock.System.now()
+
+        // A task the server has never seen needs no server call to go away. Its
+        // creation is still sitting in the queue, so both the placeholder and
+        // the edit that would have created it are dropped together — queueing a
+        // deletion for an id the server never had would only ever be rejected.
+        if (taskId < 0) {
+            database.withTransaction {
+                taskDao.deleteById(taskId)
+                pendingDao.deleteByTaskId(taskId)
+            }
+            widgetRefresher.refresh()
+            return EditResult.Synced
+        }
+
+        database.withTransaction {
+            // Anything else queued for this task is moot once it is gone, and
+            // pushing a tick at a task being deleted would just be two writes
+            // racing to matter.
+            pendingDao.deleteByTaskId(taskId)
+            taskDao.deleteById(taskId)
+            pendingDao.upsert(
+                PendingEditEntity(
+                    taskId = taskId,
+                    type = EDIT_TYPE_DELETE_TASK,
+                    done = before.done,
+                    previousDone = before.done,
+                    previousDoneAtEpochMs = before.doneAtEpochMs,
+                    taskSnapshotJson = json.encodeToString(TaskEntity.serializer(), before),
+                    // Deliberately none: a deletion is not conditional on what
+                    // the task currently says.
+                    baseUpdatedAtEpochMs = null,
+                    createdAtEpochMs = now.toEpochMilliseconds(),
+                ),
+            )
+        }
+        widgetRefresher.refresh()
+
+        val result = flushPending().resultForCaller()
+        if (result is EditResult.Queued) syncScheduler.requestImmediateSync()
+        return result
+    }
+
+    /**
      * Pushes every queued edit. Safe to call repeatedly and from anywhere —
      * after a sync, from the worker, or straight after an edit.
      */
@@ -316,6 +379,14 @@ class TaskEditRepository @Inject constructor(
                         edit.conflictOfTaskId?.let { originalId ->
                             markAsConflictCopy(remote, copyId = created.id, originalId = originalId)
                         }
+                        pushed++
+                    }
+
+                    EDIT_TYPE_DELETE_TASK -> {
+                        remote.deleteTask(edit.taskId)
+                        // Nothing to write back: the row went when the deletion
+                        // was made, and the snapshot goes with the edit.
+                        pendingDao.deleteById(edit.id)
                         pushed++
                     }
 
@@ -407,6 +478,16 @@ class TaskEditRepository @Inject constructor(
                     EDIT_TYPE_CREATE_TASK -> database.withTransaction {
                         taskDao.deleteById(edit.taskId)
                         pendingDao.deleteByTaskId(edit.taskId)
+                    }
+
+                    // The row is gone, so putting it back means re-inserting
+                    // it rather than writing over it. Label links are not
+                    // restored here — the next sync rebuilds them, and the
+                    // server still has the task, since it just refused to
+                    // remove it.
+                    EDIT_TYPE_DELETE_TASK -> database.withTransaction {
+                        edit.restoredTask(json)?.let { taskDao.upsert(it) }
+                        pendingDao.deleteById(edit.id)
                     }
 
                     EDIT_TYPE_UPDATE_TASK -> database.withTransaction {

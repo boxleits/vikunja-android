@@ -91,6 +91,20 @@ interface VikunjaRepository {
         dueDate: Instant? = null,
     ): Task
 
+    /**
+     * Deletes a task.
+     *
+     * No version check, unlike every other write here. A deletion says "I do
+     * not want this task", which does not depend on what the task currently
+     * says — and a conflict copy of something the user just deleted would be
+     * absurd. Vikunja soft-deletes for thirty days, so a deletion made against
+     * stale information is recoverable server-side rather than final.
+     *
+     * A task the server no longer has counts as deleted: 404 returns normally
+     * rather than throwing, because that is the state the call was asking for.
+     */
+    suspend fun deleteTask(taskId: Long)
+
     /** Relates one task to another; Vikunja adds the inverse itself. */
     suspend fun relateTask(taskId: Long, otherTaskId: Long, kind: String)
 
@@ -224,6 +238,20 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
         task.copy(parentTaskId = parentTaskId)
     }
 
+    override suspend fun deleteTask(taskId: Long) {
+        wrapErrors {
+            val response = api.deleteTask(taskId)
+            // A task that is already gone is the outcome this call wanted, so
+            // 404 is success rather than failure. It matters: the caller rolls
+            // a permanently refused deletion back by putting the row it removed
+            // back on screen, and doing that for a task the server has already
+            // deleted would resurrect it locally until the next sync removed it
+            // again.
+            if (response.code() == 404) return@wrapErrors
+            requireSuccess(response)
+        }
+    }
+
     override suspend fun relateTask(taskId: Long, otherTaskId: Long, kind: String) {
         wrapErrors {
             requireBody(
@@ -276,6 +304,20 @@ class RemoteVikunjaRepository(private val api: VikunjaApi) : VikunjaRepository {
      * precision worth comparing. Nothing is lost that the database ever held.
      */
     private fun Instant.toServerPrecision(): Instant = Instant.fromEpochSeconds(epochSeconds)
+
+    /**
+     * Checks the status code without demanding a body.
+     *
+     * [requireBody] treats an empty body as a server error, which is right for
+     * a call whose answer is the body and wrong for one whose answer is the
+     * status code.
+     */
+    private fun requireSuccess(response: Response<*>) {
+        if (!response.isSuccessful) {
+            if (response.code() == 401) throw VikunjaSyncException.Unauthorized()
+            throw VikunjaSyncException.Server(response.code(), response.errorBody()?.string())
+        }
+    }
 
     private fun <T> requireBody(response: Response<T>): T {
         if (!response.isSuccessful) {

@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,6 +64,7 @@ fun EditTaskDialog(
     task: Task,
     onDismiss: () -> Unit,
     onSave: (TaskEdits) -> Unit,
+    onDelete: () -> Unit,
 ) {
     var title by rememberSaveable(task.id) { mutableStateOf(task.title) }
     var priority by rememberSaveable(task.id) { mutableStateOf(task.priority) }
@@ -72,6 +75,7 @@ fun EditTaskDialog(
     }
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
     var showTimePicker by rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by rememberSaveable { mutableStateOf(false) }
 
     val zone = TimeZone.currentSystemDefault()
     val dueDate = dueDateMillis?.let { Instant.fromEpochMilliseconds(it) }
@@ -140,6 +144,41 @@ fun EditTaskDialog(
         )
     }
 
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete this task?") },
+            text = {
+                Column {
+                    Text(text = task.title, style = MaterialTheme.typography.bodyLarge)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        // Both halves are things people get wrong about a
+                        // delete, and both are true of Vikunja specifically.
+                        text = "Vikunja keeps deleted tasks for 30 days, so this can be " +
+                            "undone on the server. Any subtasks are not deleted — they " +
+                            "move up a level.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        onDelete()
+                    },
+                    // Destructive, so it is coloured as such rather than
+                    // sitting there looking like Save.
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit task") },
@@ -183,6 +222,17 @@ fun EditTaskDialog(
                         enabled = dueDate != null,
                     ) { Text("Clear") }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider()
+                // Inside the body rather than beside Save, so deleting is never
+                // one slip away from saving.
+                TextButton(
+                    onClick = { confirmDelete = true },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) { Text("Delete task") }
             }
         },
         confirmButton = {

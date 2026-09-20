@@ -6,7 +6,14 @@ import com.boxleits.vikunjaandroid.core.model.Label
 import com.boxleits.vikunjaandroid.core.model.Priority
 import com.boxleits.vikunjaandroid.core.model.Task
 import kotlinx.datetime.Instant
+import kotlinx.serialization.Serializable
 
+/**
+ * Serialisable so a queued deletion can carry the row it removed and put it
+ * back if the server refuses. Every field is a primitive, so this costs no
+ * custom serialisers.
+ */
+@Serializable
 @Entity(tableName = "tasks")
 data class TaskEntity(
     @PrimaryKey val id: Long,
