@@ -124,6 +124,26 @@ class OutlineViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Removes a task.
+     *
+     * The rollback for this one is a re-insert rather than a write, since there
+     * is no row left to write into — the queue carries a snapshot of it for
+     * exactly that. Nothing is said when it works: the task disappearing is the
+     * feedback.
+     */
+    fun deleteTask(taskId: Long) {
+        viewModelScope.launch {
+            when (val result = taskEditRepository.deleteTask(taskId)) {
+                EditResult.Synced -> Unit
+                EditResult.Conflicted -> Unit
+                is EditResult.Queued ->
+                    _errorMessage.value = "Deleted on this device — will sync when possible (${result.reason})"
+                is EditResult.Rejected -> _errorMessage.value = result.message
+            }
+        }
+    }
+
     /** The project to offer first when creating: the last one used, else the first. */
     suspend fun defaultProjectId(): Long? =
         settingsRepository.lastProjectIdFlow.first()

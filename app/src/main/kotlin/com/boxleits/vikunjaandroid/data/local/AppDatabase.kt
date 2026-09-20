@@ -25,7 +25,7 @@ import com.boxleits.vikunjaandroid.data.local.entity.TaskLabelCrossRef
         PendingEditEntity::class,
         ConflictNoticeEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +34,19 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun labelDao(): LabelDao
     abstract fun pendingEditDao(): PendingEditDao
     abstract fun conflictNoticeDao(): ConflictNoticeDao
+}
+
+/**
+ * Carries the row a queued deletion removed, so a refused delete can put it
+ * back.
+ *
+ * Nullable, so the ALTER needs no default: every edit queued before this
+ * version changes a row that stays, and has nothing to carry.
+ */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE pending_edits ADD COLUMN taskSnapshotJson TEXT")
+    }
 }
 
 /**
